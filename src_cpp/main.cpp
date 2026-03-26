@@ -4,6 +4,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "raygui.h"
@@ -26,7 +27,7 @@ constexpr int kUiTextSize = 18;
 constexpr int kMetaTextSize = 15;
 constexpr float kBaseWidth = 1440.0f;
 constexpr float kBaseHeight = 900.0f;
-constexpr int kFontAtlasSize = 72;
+constexpr int kFontAtlasSize = 96;
 
 Font g_uiFontRegular{};
 Font g_uiFontStrong{};
@@ -86,8 +87,8 @@ void LoadUiFont(const std::filesystem::path& root) {
         g_uiFontRegular = LoadFontEx(regularPath.string().c_str(), kFontAtlasSize, codepoints.data(), static_cast<int>(codepoints.size()));
         g_uiFontStrong = LoadFontEx(boldPath.string().c_str(), kFontAtlasSize, codepoints.data(), static_cast<int>(codepoints.size()));
         if (g_uiFontRegular.texture.id != 0 && g_uiFontStrong.texture.id != 0) {
-            SetTextureFilter(g_uiFontRegular.texture, TEXTURE_FILTER_BILINEAR);
-            SetTextureFilter(g_uiFontStrong.texture, TEXTURE_FILTER_BILINEAR);
+            SetTextureFilter(g_uiFontRegular.texture, TEXTURE_FILTER_POINT);
+            SetTextureFilter(g_uiFontStrong.texture, TEXTURE_FILTER_POINT);
             GuiSetFont(g_uiFontRegular);
             g_hasCustomFont = true;
         }
@@ -114,22 +115,26 @@ float ScalePx(float value) {
     return value * g_uiScale;
 }
 
+float ScaleText(float value) {
+    return value * std::max(1.14f, g_uiScale * 1.08f);
+}
+
 void UpdateUiScale() {
     const float widthScale = static_cast<float>(GetScreenWidth()) / kBaseWidth;
     const float heightScale = static_cast<float>(GetScreenHeight()) / kBaseHeight;
-    g_uiScale = std::clamp(std::min(widthScale, heightScale), 0.95f, 1.55f);
+    g_uiScale = std::clamp(std::min(widthScale, heightScale), 1.00f, 1.65f);
     GuiSetStyle(DEFAULT, TEXT_SIZE, static_cast<int>(std::round(ScalePx(static_cast<float>(kUiTextSize)))));
     GuiSetStyle(DEFAULT, TEXT_SPACING, static_cast<int>(std::round(std::max(1.0f, g_uiScale))));
 }
 
 float MeasureUiText(const std::string& text, float fontSize, bool strong = false) {
     const Font& font = strong ? g_uiFontStrong : g_uiFontRegular;
-    return MeasureTextEx(font, text.c_str(), ScalePx(fontSize), std::max(1.0f, g_uiScale)).x;
+    return MeasureTextEx(font, text.c_str(), ScaleText(fontSize), std::max(1.0f, g_uiScale)).x;
 }
 
 void DrawUiText(const std::string& text, float x, float y, float fontSize, Color color, bool strong = false) {
     const Font& font = strong ? g_uiFontStrong : g_uiFontRegular;
-    DrawTextEx(font, text.c_str(), Vector2{x, y}, ScalePx(fontSize), std::max(1.0f, g_uiScale), color);
+    DrawTextEx(font, text.c_str(), Vector2{x, y}, ScaleText(fontSize), std::max(1.0f, g_uiScale), color);
 }
 
 std::string FitText(const std::string& text, float fontSize, float maxWidth, bool strong = false) {
@@ -262,8 +267,10 @@ std::filesystem::path ResolveDataFile(const std::filesystem::path& root) {
 }
 
 void OpenFolderInExplorer(const std::filesystem::path& folder) {
-    const std::string command = "explorer \"" + folder.string() + "\"";
-    std::system(command.c_str());
+    const std::string command = "cmd /c start \"\" explorer \"" + folder.string() + "\"";
+    std::thread([command]() {
+        std::system(command.c_str());
+    }).detach();
 }
 
 UiLayout BuildLayout() {

@@ -17,6 +17,7 @@ target_include_directories(factor_third_party_headers SYSTEM INTERFACE
 )
 
 add_executable(factor_manager
+    src_cpp/i18n.cpp
     src_cpp/main.cpp
     src_cpp/storage.cpp
     src_cpp/raygui_bridge.cpp

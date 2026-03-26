@@ -33,6 +33,8 @@ This project showcases:
   View due-today and overdue maintenance items
 - Simulation mode
   Preview future maintenance status without editing persisted records
+- Language packs
+  Load UI text from locale JSON files with built-in English and Traditional Chinese
 
 ## Architecture
 
@@ -40,6 +42,8 @@ The application is intentionally split into a few small layers so the codebase r
 
 - `src_cpp/main.cpp`
   Desktop UI flow, panel rendering, and user actions
+- `app_include/i18n.hpp` and `src_cpp/i18n.cpp`
+  Locale file loading and runtime language switching
 - `app_include/model.hpp`
   Domain entities such as production lines, equipment, and maintenance items
 - `app_include/storage.hpp` and `src_cpp/storage.cpp`
@@ -97,6 +101,7 @@ The app reads and writes data from `data/database.json`.
 
 - `src_cpp/`: modern C++ application logic
 - `app_include/`: domain model and storage interfaces
+- `data/locales/`: UI language packs
 - `src/cJSON.c`: bundled JSON dependency
 - `include/`: third-party GUI headers
 - `data/`: persisted local application data

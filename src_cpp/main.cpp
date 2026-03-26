@@ -52,6 +52,7 @@ struct AppUi {
     float linesScroll = 0.0f;
     float equipmentScroll = 0.0f;
     float itemsScroll = 0.0f;
+    float dashboardScroll = 0.0f;
     float dueAlertsScroll = 0.0f;
     float overdueAlertsScroll = 0.0f;
     bool hideDashboardInSimulation = false;
@@ -242,9 +243,9 @@ std::string SimulationToggleLabel(const AppData& data) {
         g_localizer.ActiveIndex() < static_cast<int>(g_localizer.Languages().size()) &&
         g_localizer.Languages()[g_localizer.ActiveIndex()].code == "zh-TW";
     if (isTraditionalChinese) {
-        return data.simulation.enabled ? "關閉模擬模式" : "開啟模擬模式";
+        return data.simulation.enabled ? "離開模擬" : "模擬模式";
     }
-    return data.simulation.enabled ? "Disable simulation" : "Enable simulation";
+    return data.simulation.enabled ? "Exit simulation" : "Simulation mode";
 }
 
 std::string Utf8FromCodepoint(int codepoint) {
@@ -307,7 +308,7 @@ void OpenFolderInExplorer(const std::filesystem::path& folder) {
 UiLayout BuildLayout(bool hideDashboard) {
     const float margin = ScalePx(18.0f);
     const float gap = ScalePx(18.0f);
-    const float top = ScalePx(108.0f);
+    const float top = ScalePx(122.0f);
     const float bottom = ScalePx(18.0f);
     const float horizontalGaps = hideDashboard ? (gap * 2.0f) : (gap * 3.0f);
     const float totalWidth = static_cast<float>(GetScreenWidth()) - (margin * 2.0f) - horizontalGaps;
@@ -592,57 +593,77 @@ void DrawAlertsPanel(const UiLayout& layout, const AppData& data, AppUi& ui) {
 }
 
 void DrawHeader(AppData& data, AppUi& ui) {
-    const float headerHeight = ScalePx(88.0f);
+    const float headerHeight = ScalePx(104.0f);
     DrawRectangleGradientH(0, 0, GetScreenWidth(), static_cast<int>(headerHeight), Color{9, 26, 43, 255}, Color{12, 50, 88, 255});
     DrawUiText(T("app.title"), ScalePx(24.0f), ScalePx(14.0f), 38.0f, RAYWHITE, true);
     DrawUiText(T("app.subtitle"), ScalePx(26.0f), ScalePx(54.0f), 18.0f, Color{187, 214, 239, 255});
 
     const std::string currentDate = T1("header.current_date", EffectiveDate(data));
     const std::string simulationToggle = SimulationToggleLabel(data);
-    const float simulationToggleWidth = std::max(ScalePx(168.0f), MeasureUiText(simulationToggle, 15.0f, true) + ScalePx(26.0f));
-    const Rectangle simulationToggleRect{
-        static_cast<float>(GetScreenWidth()) - ScalePx(280.0f) - simulationToggleWidth - ScalePx(28.0f),
-        ScalePx(16.0f),
-        simulationToggleWidth,
-        ScalePx(28.0f)
-    };
-    if (GuiButton(simulationToggleRect, simulationToggle.c_str())) {
-        data.simulation.enabled = !data.simulation.enabled;
-        if (!data.simulation.enabled) {
-            ui.hideDashboardInSimulation = false;
-        }
-        RefreshStatuses(data);
-        SetBanner(ui, data.simulation.enabled ? T("banner.simulation_enabled") : T("banner.simulation_disabled"));
-    }
-    DrawUiText(currentDate, static_cast<float>(GetScreenWidth()) - ScalePx(280.0f), ScalePx(20.0f), 18.0f, Color{230, 241, 255, 255});
+    const float rightMargin = ScalePx(24.0f);
+    const float controlsTop = ScalePx(16.0f);
+    const float buttonsY = ScalePx(56.0f);
+    const float buttonHeight = ScalePx(30.0f);
+    const float buttonGap = ScalePx(8.0f);
+
+    DrawUiText(currentDate, static_cast<float>(GetScreenWidth()) - ScalePx(220.0f), controlsTop, 18.0f, Color{230, 241, 255, 255});
     DrawUiText(data.simulation.enabled ? T("header.mode.simulation") : T("header.mode.live"),
-               static_cast<float>(GetScreenWidth()) - ScalePx(280.0f), ScalePx(48.0f), 17.0f,
+               static_cast<float>(GetScreenWidth()) - ScalePx(220.0f), ScalePx(40.0f), 17.0f,
                data.simulation.enabled ? Color{255, 212, 112, 255} : Color{145, 233, 176, 255});
 
-    DrawUiText(T("header.language"), static_cast<float>(GetScreenWidth()) - ScalePx(480.0f), ScalePx(20.0f), 17.0f, Color{230, 241, 255, 255});
-    float languageX = static_cast<float>(GetScreenWidth()) - ScalePx(480.0f);
+    float totalLanguageWidth = 0.0f;
+    std::vector<float> languageWidths;
+    languageWidths.reserve(g_localizer.Languages().size());
+    for (const auto& language : g_localizer.Languages()) {
+        const float width = std::max(ScalePx(78.0f), MeasureUiText(language.displayName, 14.5f, true) + ScalePx(18.0f));
+        languageWidths.push_back(width);
+        totalLanguageWidth += width;
+    }
+    if (!languageWidths.empty()) {
+        totalLanguageWidth += buttonGap * static_cast<float>(languageWidths.size() - 1);
+    }
+
+    float extraWidth = 0.0f;
+    const std::string dashboardToggle = data.simulation.enabled ? DashboardToggleLabel(data, ui) : "";
+    const float dashboardToggleWidth = data.simulation.enabled
+        ? std::max(ScalePx(124.0f), MeasureUiText(dashboardToggle, 14.5f, true) + ScalePx(20.0f))
+        : 0.0f;
+    const float simulationToggleWidth = std::max(ScalePx(126.0f), MeasureUiText(simulationToggle, 14.5f, true) + ScalePx(20.0f));
+    extraWidth += simulationToggleWidth + buttonGap;
+    if (data.simulation.enabled) {
+        extraWidth += dashboardToggleWidth + buttonGap;
+    }
+
+    float languageX = static_cast<float>(GetScreenWidth()) - rightMargin - totalLanguageWidth;
+    float actionsX = languageX - extraWidth;
+    if (actionsX < ScalePx(860.0f)) {
+        actionsX = ScalePx(860.0f);
+        languageX = actionsX + extraWidth;
+    }
+
+    DrawUiText(T("header.language"), languageX, controlsTop, 15.0f, Color{230, 241, 255, 255});
     for (int languageIndex = 0; languageIndex < static_cast<int>(g_localizer.Languages().size()); ++languageIndex) {
         const auto& language = g_localizer.Languages()[languageIndex];
-        const int buttonWidth = static_cast<int>(std::max(ScalePx(82.0f), MeasureUiText(language.displayName, 15.0f, true) + ScalePx(22.0f)));
-        if (GuiButton(Rectangle{languageX, ScalePx(44.0f), static_cast<float>(buttonWidth), ScalePx(30.0f)}, language.displayName.c_str())) {
+        const float buttonWidth = languageWidths[languageIndex];
+        if (GuiButton(Rectangle{languageX, buttonsY, buttonWidth, buttonHeight}, language.displayName.c_str())) {
             g_localizer.SetActiveCode(language.code);
             SetBanner(ui, T("banner.language_switched"));
         }
         if (languageIndex == g_localizer.ActiveIndex()) {
-            DrawRectangleLinesEx(Rectangle{languageX, ScalePx(44.0f), static_cast<float>(buttonWidth), ScalePx(30.0f)}, std::max(1.4f, ScalePx(1.6f)), Color{82, 168, 255, 255});
+            DrawRectangleLinesEx(Rectangle{languageX, buttonsY, buttonWidth, buttonHeight}, std::max(1.4f, ScalePx(1.6f)), Color{82, 168, 255, 255});
         }
-        languageX += static_cast<float>(buttonWidth) + ScalePx(8.0f);
+        languageX += buttonWidth + buttonGap;
+    }
+
+    if (GuiButton(Rectangle{actionsX, buttonsY, simulationToggleWidth, buttonHeight}, simulationToggle.c_str())) {
+        data.simulation.enabled = !data.simulation.enabled;
+        ui.hideDashboardInSimulation = data.simulation.enabled;
+        RefreshStatuses(data);
+        SetBanner(ui, data.simulation.enabled ? T("banner.simulation_enabled") : T("banner.simulation_disabled"));
     }
 
     if (data.simulation.enabled) {
-        const std::string dashboardToggle = DashboardToggleLabel(data, ui);
-        const float toggleWidth = std::max(ScalePx(150.0f), MeasureUiText(dashboardToggle, 15.0f, true) + ScalePx(22.0f));
-        const Rectangle toggleRect{
-            static_cast<float>(GetScreenWidth()) - ScalePx(280.0f) - toggleWidth - ScalePx(20.0f),
-            ScalePx(44.0f),
-            toggleWidth,
-            ScalePx(30.0f)
-        };
+        const Rectangle toggleRect{actionsX + simulationToggleWidth + buttonGap, buttonsY, dashboardToggleWidth, buttonHeight};
         if (GuiButton(toggleRect, dashboardToggle.c_str())) {
             ui.hideDashboardInSimulation = !ui.hideDashboardInSimulation;
         }
@@ -651,7 +672,7 @@ void DrawHeader(AppData& data, AppUi& ui) {
     }
 
     if (!ui.banner.empty() && GetTime() <= ui.bannerUntil) {
-        const Rectangle banner{ScalePx(430.0f), ScalePx(18.0f), ScalePx(490.0f), ScalePx(42.0f)};
+        const Rectangle banner{ScalePx(430.0f), ScalePx(18.0f), ScalePx(430.0f), ScalePx(42.0f)};
         DrawRectangleRounded(banner, 0.3f, 8, Color{15, 90, 70, 220});
         DrawUiText(FitText(ui.banner, 17.0f, banner.width - ScalePx(26.0f)), banner.x + ScalePx(14.0f), banner.y + ScalePx(10.0f), 17.0f, RAYWHITE);
     }
@@ -911,9 +932,11 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 
     DrawUiText(T("label.add_item"), panel.x + ScalePx(18.0f), footerTop, 17.0f, RAYWHITE, true);
     const float itemInputWidth = std::max(ScalePx(180.0f), panel.width - ScalePx(258.0f));
+    const float daysLabelX = panel.x + ScalePx(26.0f) + itemInputWidth;
     const float rowOneY = footerTop + ScalePx(24.0f);
     DrawInputBox(Rectangle{panel.x + ScalePx(18.0f), rowOneY, itemInputWidth, ScalePx(40.0f)}, ui.newItemName, FocusField::NewItem, ui, T("placeholder.new_item"));
-    GuiSpinner(Rectangle{panel.x + ScalePx(26.0f) + itemInputWidth, rowOneY, ScalePx(98.0f), ScalePx(40.0f)}, T("label.days").c_str(), &ui.newItemPeriod, 1, 365, true);
+    DrawUiText(T("label.days"), daysLabelX, footerTop + ScalePx(2.0f), 13.5f, Color{160, 170, 180, 255});
+    GuiSpinner(Rectangle{daysLabelX, rowOneY, ScalePx(98.0f), ScalePx(40.0f)}, "", &ui.newItemPeriod, 1, 365, true);
     if (GuiButton(Rectangle{panel.x + panel.width - ScalePx(92.0f), rowOneY, ScalePx(74.0f), ScalePx(40.0f)}, T("button.add").c_str()) && !ui.newItemName.empty()) {
         if (!data.simulation.enabled) {
             equipment.items.push_back(MaintenanceItem{ui.newItemName, ui.newItemPeriod, "1970-01-01", false});
@@ -930,7 +953,8 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
     DrawUiText(T("label.edit_item"), panel.x + ScalePx(18.0f), footerTop + ScalePx(72.0f), 17.0f, RAYWHITE, true);
     const float rowTwoY = footerTop + ScalePx(96.0f);
     DrawInputBox(Rectangle{panel.x + ScalePx(18.0f), rowTwoY, itemInputWidth, ScalePx(40.0f)}, ui.renameItemName, FocusField::RenameItem, ui, T("placeholder.rename_item"));
-    GuiSpinner(Rectangle{panel.x + ScalePx(26.0f) + itemInputWidth, rowTwoY, ScalePx(98.0f), ScalePx(40.0f)}, T("label.days").c_str(), &ui.renameItemPeriod, 1, 365, true);
+    DrawUiText(T("label.days"), daysLabelX, footerTop + ScalePx(74.0f), 13.5f, Color{160, 170, 180, 255});
+    GuiSpinner(Rectangle{daysLabelX, rowTwoY, ScalePx(98.0f), ScalePx(40.0f)}, "", &ui.renameItemPeriod, 1, 365, true);
     if (GuiButton(Rectangle{panel.x + panel.width - ScalePx(92.0f), rowTwoY, ScalePx(74.0f), ScalePx(40.0f)}, T("button.save").c_str()) &&
         ui.selectedItem >= 0 && ui.selectedItem < static_cast<int>(equipment.items.size()) && !ui.renameItemName.empty()) {
         if (!data.simulation.enabled) {
@@ -950,6 +974,12 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
 
     const std::string panelTitle = T("panel.dashboard");
     const Rectangle panel = Panel(layout.dashboard.x, layout.dashboard.y, layout.dashboard.width, layout.dashboard.height, panelTitle.c_str());
+    const Rectangle contentArea{
+        panel.x + ScalePx(8.0f),
+        panel.y + ScalePx(52.0f),
+        panel.width - ScalePx(8.0f),
+        panel.height - ScalePx(60.0f)
+    };
     int equipmentCount = 0;
     int itemCount = 0;
     for (const auto& line : data.lines) {
@@ -959,46 +989,53 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
         }
     }
 
+    float totalContentHeight = ScalePx(42.0f) + ScalePx(76.0f) * 3.0f + ScalePx(86.0f) * 2.0f + ScalePx(98.0f) + ScalePx(92.0f);
+    if (data.simulation.enabled) {
+        totalContentHeight += ScalePx(220.0f);
+    }
+    HandleWheelScroll(contentArea, totalContentHeight, ui.dashboardScroll);
+    BeginScissorMode(static_cast<int>(contentArea.x), static_cast<int>(contentArea.y), static_cast<int>(contentArea.width), static_cast<int>(contentArea.height));
+
+    float y = contentArea.y - ui.dashboardScroll;
+
     bool simEnabled = data.simulation.enabled;
-    if (GuiCheckBox(Rectangle{panel.x + ScalePx(16.0f), panel.y + ScalePx(52.0f), ScalePx(24.0f), ScalePx(24.0f)}, T("label.enable_simulation").c_str(), &simEnabled)) {
+    if (GuiCheckBox(Rectangle{panel.x + ScalePx(16.0f), y, ScalePx(24.0f), ScalePx(24.0f)}, T("label.enable_simulation").c_str(), &simEnabled)) {
         data.simulation.enabled = simEnabled;
         RefreshStatuses(data);
         SetBanner(ui, data.simulation.enabled ? T("banner.simulation_enabled") : T("banner.simulation_disabled"));
     }
-
-    DrawInfoCard(Rectangle{panel.x + ScalePx(16.0f), panel.y + ScalePx(94.0f), panel.width - ScalePx(32.0f), ScalePx(76.0f)},
+    y += ScalePx(42.0f);
+    DrawInfoCard(Rectangle{panel.x + ScalePx(16.0f), y, panel.width - ScalePx(32.0f), ScalePx(76.0f)},
                  T("label.lines_title"), std::to_string(static_cast<int>(data.lines.size())), Color{71, 153, 255, 255});
-    DrawInfoCard(Rectangle{panel.x + ScalePx(16.0f), panel.y + ScalePx(180.0f), panel.width - ScalePx(32.0f), ScalePx(76.0f)},
+    y += ScalePx(86.0f);
+    DrawInfoCard(Rectangle{panel.x + ScalePx(16.0f), y, panel.width - ScalePx(32.0f), ScalePx(76.0f)},
                  T("label.equipment_title"), std::to_string(equipmentCount), Color{114, 197, 149, 255});
-    DrawInfoCard(Rectangle{panel.x + ScalePx(16.0f), panel.y + ScalePx(266.0f), panel.width - ScalePx(32.0f), ScalePx(76.0f)},
+    y += ScalePx(86.0f);
+    DrawInfoCard(Rectangle{panel.x + ScalePx(16.0f), y, panel.width - ScalePx(32.0f), ScalePx(76.0f)},
                  T("label.items_title"), std::to_string(itemCount), Color{241, 192, 84, 255});
-
-    DrawUiText(T("label.data_file"), panel.x + ScalePx(16.0f), panel.y + ScalePx(360.0f), 15.5f, Color{160, 170, 180, 255});
-    DrawUiText(FitText(dataFile.string(), 14.0f, panel.width - ScalePx(32.0f)), panel.x + ScalePx(16.0f), panel.y + ScalePx(384.0f), 14.0f, RAYWHITE);
-    if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), panel.y + ScalePx(410.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.open_data_folder").c_str())) {
+    y += ScalePx(94.0f);
+    DrawUiText(T("label.data_file"), panel.x + ScalePx(16.0f), y, 15.5f, Color{160, 170, 180, 255});
+    DrawUiText(FitText(dataFile.string(), 14.0f, panel.width - ScalePx(32.0f)), panel.x + ScalePx(16.0f), y + ScalePx(24.0f), 14.0f, RAYWHITE);
+    if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), y + ScalePx(50.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.open_data_folder").c_str())) {
         OpenFolderInExplorer(dataFile.parent_path());
     }
-
-    float actionsTop = panel.y + ScalePx(458.0f);
+    y += ScalePx(98.0f);
     if (data.simulation.enabled) {
-        DrawUiText(T("label.simulation_date"), panel.x + ScalePx(16.0f), actionsTop, 17.0f, Color{255, 212, 112, 255}, true);
-        GuiSpinner(Rectangle{panel.x + ScalePx(16.0f), actionsTop + ScalePx(30.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("label.year").c_str(), &data.simulation.year, 2020, 2100, true);
-        GuiSpinner(Rectangle{panel.x + ScalePx(16.0f), actionsTop + ScalePx(76.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("label.month").c_str(), &data.simulation.month, 1, 12, true);
-        GuiSpinner(Rectangle{panel.x + ScalePx(16.0f), actionsTop + ScalePx(122.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("label.day").c_str(), &data.simulation.day, 1, 31, true);
-
-        if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), actionsTop + ScalePx(170.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.jump_today").c_str())) {
+        DrawUiText(T("label.simulation_date"), panel.x + ScalePx(16.0f), y, 17.0f, Color{255, 212, 112, 255}, true);
+        GuiSpinner(Rectangle{panel.x + ScalePx(16.0f), y + ScalePx(30.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("label.year").c_str(), &data.simulation.year, 2020, 2100, true);
+        GuiSpinner(Rectangle{panel.x + ScalePx(16.0f), y + ScalePx(76.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("label.month").c_str(), &data.simulation.month, 1, 12, true);
+        GuiSpinner(Rectangle{panel.x + ScalePx(16.0f), y + ScalePx(122.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("label.day").c_str(), &data.simulation.day, 1, 31, true);
+        if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), y + ScalePx(170.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.jump_today").c_str())) {
             ResetSimulationToToday(data);
             RefreshStatuses(data);
             SetBanner(ui, T("banner.simulation_today"));
         }
-        actionsTop += ScalePx(220.0f);
+        y += ScalePx(220.0f);
     }
-
-    if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), actionsTop, panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.refresh").c_str())) {
+    if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), y, panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.refresh").c_str())) {
         RefreshStatuses(data);
     }
-
-    if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), actionsTop + ScalePx(46.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.load_sample").c_str())) {
+    if (GuiButton(Rectangle{panel.x + ScalePx(16.0f), y + ScalePx(46.0f), panel.width - ScalePx(32.0f), ScalePx(36.0f)}, T("button.load_sample").c_str())) {
         if (!data.simulation.enabled) {
             data = BuildSampleData();
             RefreshStatuses(data);
@@ -1012,6 +1049,8 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
             PersistIfAllowed(data, dataFile, ui);
         }
     }
+    EndScissorMode();
+    DrawScrollHint(contentArea, totalContentHeight, ui.dashboardScroll);
 
 }
 

@@ -84,6 +84,24 @@ build/factor_manager.exe
 
 The app reads and writes all maintenance records from `data/maintenance/database.json`.
 
+## Release Package
+
+If you want a portable Windows build, package the app with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1 -Version v1.0.0
+```
+
+The generated package includes:
+
+- `factor_manager.exe`
+- `raylib.dll`
+- the full `data/` folder
+- `README.md`
+- `LICENSE`
+
+This means the app is not a single-file executable. The release package must keep `exe`, `dll`, and `data/` together.
+
 ## What Makes This Resume-Worthy
 
 - It solves a believable real-world operations problem instead of being a generic todo app.

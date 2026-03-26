@@ -1,5 +1,8 @@
 build/
 build_manual/
+dist/
+release/
+scripts/*.generated.*
 obj/
 output/
 legacy_build/
@@ -11,7 +14,11 @@ legacy_build/
 *.log
 *.cache
 *.tmp
+factorcap*.png
+ffmpeg_factor_test.png
+gui_verify_*.png
 .vscode/
 .idea/
 !README.md
 data/*.bak
+data/maintenance/*.bak

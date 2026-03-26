@@ -276,27 +276,35 @@ void OpenFolderInExplorer(const std::filesystem::path& folder) {
     }).detach();
 }
 
-UiLayout BuildLayout() {
+UiLayout BuildLayout(bool hideDashboard) {
     const float margin = ScalePx(18.0f);
     const float gap = ScalePx(18.0f);
     const float top = ScalePx(108.0f);
     const float bottom = ScalePx(18.0f);
-    const float totalWidth = static_cast<float>(GetScreenWidth()) - (margin * 2.0f) - (gap * 3.0f);
+    const float horizontalGaps = hideDashboard ? (gap * 2.0f) : (gap * 3.0f);
+    const float totalWidth = static_cast<float>(GetScreenWidth()) - (margin * 2.0f) - horizontalGaps;
     const float panelHeight = static_cast<float>(GetScreenHeight()) - top - bottom;
     const float bottomBandHeight = std::clamp(panelHeight * 0.25f, ScalePx(200.0f), ScalePx(280.0f));
     const float topPanelHeight = panelHeight - bottomBandHeight - gap;
 
     const float linesWidth = std::clamp(totalWidth * 0.18f, ScalePx(240.0f), ScalePx(320.0f));
     const float equipmentWidth = std::clamp(totalWidth * 0.23f, ScalePx(280.0f), ScalePx(380.0f));
-    const float dashboardWidth = std::clamp(totalWidth * 0.20f, ScalePx(260.0f), ScalePx(360.0f));
+    const float dashboardWidth = hideDashboard ? 0.0f : std::clamp(totalWidth * 0.20f, ScalePx(260.0f), ScalePx(360.0f));
     const float itemsWidth = std::max(ScalePx(360.0f), totalWidth - linesWidth - equipmentWidth - dashboardWidth);
 
     UiLayout layout{};
     layout.lines = Rectangle{margin, top, linesWidth, panelHeight};
     layout.equipment = Rectangle{layout.lines.x + layout.lines.width + gap, top, equipmentWidth, panelHeight};
     layout.items = Rectangle{layout.equipment.x + layout.equipment.width + gap, top, itemsWidth, topPanelHeight};
-    layout.dashboard = Rectangle{layout.items.x + layout.items.width + gap, top, dashboardWidth, topPanelHeight};
-    layout.alerts = Rectangle{layout.items.x, top + topPanelHeight + gap, itemsWidth + gap + dashboardWidth, bottomBandHeight};
+    layout.dashboard = hideDashboard
+        ? Rectangle{layout.items.x + layout.items.width, top, 0.0f, 0.0f}
+        : Rectangle{layout.items.x + layout.items.width + gap, top, dashboardWidth, topPanelHeight};
+    layout.alerts = Rectangle{
+        layout.items.x,
+        top + topPanelHeight + gap,
+        hideDashboard ? itemsWidth : (itemsWidth + gap + dashboardWidth),
+        bottomBandHeight
+    };
     return layout;
 }
 
@@ -765,7 +773,8 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 
     auto& equipment = data.lines[ui.selectedLine].equipment[ui.selectedEquipment];
     DrawUiText(FitText(equipment.name, 21.0f, panel.width - ScalePx(24.0f), true), panel.x + ScalePx(12.0f), panel.y + ScalePx(54.0f), 21.0f, RAYWHITE, true);
-    const Rectangle listArea{panel.x + ScalePx(8.0f), panel.y + ScalePx(92.0f), panel.width - ScalePx(8.0f), panel.height - ScalePx(216.0f)};
+    const float footerTop = panel.y + panel.height - ScalePx(152.0f);
+    const Rectangle listArea{panel.x + ScalePx(8.0f), panel.y + ScalePx(92.0f), panel.width - ScalePx(8.0f), footerTop - (panel.y + ScalePx(100.0f))};
     const float rowHeight = ScalePx(92.0f);
     const float contentHeight = static_cast<float>(equipment.items.size()) * rowHeight;
     HandleWheelScroll(listArea, contentHeight, ui.itemsScroll);
@@ -837,11 +846,15 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
     }
     DrawScrollHint(listArea, contentHeight, ui.itemsScroll);
 
-    DrawUiText(T("label.add_item"), panel.x + ScalePx(12.0f), panel.y + panel.height - ScalePx(136.0f), 18.0f, RAYWHITE, true);
-    const float itemInputWidth = std::max(ScalePx(180.0f), panel.width - ScalePx(248.0f));
-    DrawInputBox(Rectangle{panel.x + ScalePx(12.0f), panel.y + panel.height - ScalePx(100.0f), itemInputWidth, ScalePx(42.0f)}, ui.newItemName, FocusField::NewItem, ui, T("placeholder.new_item"));
-    GuiSpinner(Rectangle{panel.x + ScalePx(20.0f) + itemInputWidth, panel.y + panel.height - ScalePx(100.0f), ScalePx(98.0f), ScalePx(42.0f)}, T("label.days").c_str(), &ui.newItemPeriod, 1, 365, true);
-    if (GuiButton(Rectangle{panel.x + panel.width - ScalePx(92.0f), panel.y + panel.height - ScalePx(100.0f), ScalePx(80.0f), ScalePx(42.0f)}, T("button.add").c_str()) && !ui.newItemName.empty()) {
+    DrawRectangleRounded(Rectangle{panel.x + ScalePx(10.0f), footerTop - ScalePx(8.0f), panel.width - ScalePx(20.0f), ScalePx(146.0f)}, 0.12f, 8, Color{16, 24, 36, 220});
+    DrawRectangleRoundedLines(Rectangle{panel.x + ScalePx(10.0f), footerTop - ScalePx(8.0f), panel.width - ScalePx(20.0f), ScalePx(146.0f)}, 0.12f, 8, std::max(1.0f, ScalePx(1.1f)), Color{48, 64, 86, 255});
+
+    DrawUiText(T("label.add_item"), panel.x + ScalePx(18.0f), footerTop, 17.0f, RAYWHITE, true);
+    const float itemInputWidth = std::max(ScalePx(180.0f), panel.width - ScalePx(258.0f));
+    const float rowOneY = footerTop + ScalePx(24.0f);
+    DrawInputBox(Rectangle{panel.x + ScalePx(18.0f), rowOneY, itemInputWidth, ScalePx(40.0f)}, ui.newItemName, FocusField::NewItem, ui, T("placeholder.new_item"));
+    GuiSpinner(Rectangle{panel.x + ScalePx(26.0f) + itemInputWidth, rowOneY, ScalePx(98.0f), ScalePx(40.0f)}, T("label.days").c_str(), &ui.newItemPeriod, 1, 365, true);
+    if (GuiButton(Rectangle{panel.x + panel.width - ScalePx(92.0f), rowOneY, ScalePx(74.0f), ScalePx(40.0f)}, T("button.add").c_str()) && !ui.newItemName.empty()) {
         if (!data.simulation.enabled) {
             equipment.items.push_back(MaintenanceItem{ui.newItemName, ui.newItemPeriod, "1970-01-01", false});
             ui.selectedItem = static_cast<int>(equipment.items.size()) - 1;
@@ -854,10 +867,11 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
         }
     }
 
-    DrawUiText(T("label.edit_item"), panel.x + ScalePx(12.0f), panel.y + panel.height - ScalePx(54.0f), 18.0f, RAYWHITE, true);
-    DrawInputBox(Rectangle{panel.x + ScalePx(12.0f), panel.y + panel.height - ScalePx(22.0f), itemInputWidth, ScalePx(42.0f)}, ui.renameItemName, FocusField::RenameItem, ui, T("placeholder.rename_item"));
-    GuiSpinner(Rectangle{panel.x + ScalePx(20.0f) + itemInputWidth, panel.y + panel.height - ScalePx(22.0f), ScalePx(98.0f), ScalePx(42.0f)}, T("label.days").c_str(), &ui.renameItemPeriod, 1, 365, true);
-    if (GuiButton(Rectangle{panel.x + panel.width - ScalePx(92.0f), panel.y + panel.height - ScalePx(22.0f), ScalePx(80.0f), ScalePx(42.0f)}, T("button.save").c_str()) &&
+    DrawUiText(T("label.edit_item"), panel.x + ScalePx(18.0f), footerTop + ScalePx(72.0f), 17.0f, RAYWHITE, true);
+    const float rowTwoY = footerTop + ScalePx(96.0f);
+    DrawInputBox(Rectangle{panel.x + ScalePx(18.0f), rowTwoY, itemInputWidth, ScalePx(40.0f)}, ui.renameItemName, FocusField::RenameItem, ui, T("placeholder.rename_item"));
+    GuiSpinner(Rectangle{panel.x + ScalePx(26.0f) + itemInputWidth, rowTwoY, ScalePx(98.0f), ScalePx(40.0f)}, T("label.days").c_str(), &ui.renameItemPeriod, 1, 365, true);
+    if (GuiButton(Rectangle{panel.x + panel.width - ScalePx(92.0f), rowTwoY, ScalePx(74.0f), ScalePx(40.0f)}, T("button.save").c_str()) &&
         ui.selectedItem >= 0 && ui.selectedItem < static_cast<int>(equipment.items.size()) && !ui.renameItemName.empty()) {
         if (!data.simulation.enabled) {
             equipment.items[ui.selectedItem].name = ui.renameItemName;
@@ -870,6 +884,10 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 }
 
 void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::filesystem::path& dataFile) {
+    if (layout.dashboard.width <= 1.0f || layout.dashboard.height <= 1.0f) {
+        return;
+    }
+
     const std::string panelTitle = T("panel.dashboard");
     const Rectangle panel = Panel(layout.dashboard.x, layout.dashboard.y, layout.dashboard.width, layout.dashboard.height, panelTitle.c_str());
     int equipmentCount = 0;
@@ -978,7 +996,7 @@ int main(int argc, char** argv) {
         UpdateUiScale();
         RefreshStatuses(data);
         ClampSelections(data, ui);
-        const UiLayout layout = BuildLayout();
+        const UiLayout layout = BuildLayout(data.simulation.enabled);
 
         BeginDrawing();
         ClearBackground(Color{15, 20, 29, 255});

@@ -16,7 +16,7 @@ target_include_directories(factor_third_party_headers SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-add_executable(factor_manager
+add_executable(factor_manager WIN32
     src_cpp/i18n.cpp
     src_cpp/main.cpp
     src_cpp/storage.cpp

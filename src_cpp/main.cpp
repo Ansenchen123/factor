@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 #include "raygui.h"
@@ -17,6 +18,11 @@ constexpr int kWindowHeight = 900;
 constexpr int kWindowMinWidth = 1200;
 constexpr int kWindowMinHeight = 760;
 constexpr int kInputLimit = 48;
+constexpr int kUiTextSize = 18;
+constexpr int kMetaTextSize = 15;
+
+Font g_uiFont{};
+bool g_hasCustomFont = false;
 
 enum class FocusField {
     None,
@@ -44,6 +50,51 @@ struct AppUi {
     std::string banner;
     double bannerUntil = 0.0;
 };
+
+void LoadUiFont(const std::filesystem::path& root) {
+    const auto fontPath = root / "data" / "font_bold.otf";
+    if (std::filesystem::exists(fontPath)) {
+        g_uiFont = LoadFontEx(fontPath.string().c_str(), 32, nullptr, 0);
+        if (g_uiFont.texture.id != 0) {
+            GuiSetFont(g_uiFont);
+            g_hasCustomFont = true;
+        }
+    }
+
+    if (!g_hasCustomFont) {
+        g_uiFont = GetFontDefault();
+        GuiSetFont(g_uiFont);
+    }
+
+    GuiSetStyle(DEFAULT, TEXT_SIZE, kUiTextSize);
+    GuiSetStyle(DEFAULT, TEXT_SPACING, 1);
+}
+
+void UnloadUiFont() {
+    if (g_hasCustomFont) {
+        UnloadFont(g_uiFont);
+    }
+}
+
+float MeasureUiText(const std::string& text, float fontSize) {
+    return MeasureTextEx(g_uiFont, text.c_str(), fontSize, 1.0f).x;
+}
+
+std::string FitText(const std::string& text, float fontSize, float maxWidth) {
+    if (text.empty() || MeasureUiText(text, fontSize) <= maxWidth) {
+        return text;
+    }
+
+    std::string trimmed = text;
+    while (!trimmed.empty()) {
+        trimmed.pop_back();
+        const std::string candidate = trimmed + "...";
+        if (MeasureUiText(candidate, fontSize) <= maxWidth) {
+            return candidate;
+        }
+    }
+    return "...";
+}
 
 std::filesystem::path ResolveProjectRoot(char* argv0) {
     std::filesystem::path current = std::filesystem::absolute(argv0).parent_path();
@@ -125,7 +176,7 @@ void DrawInputBox(Rectangle bounds, std::string& value, FocusField field, AppUi&
     DrawRectangleRounded(bounds, 0.2f, 8, active ? Color{32, 46, 60, 255} : Color{24, 34, 46, 255});
     DrawRectangleRoundedLines(bounds, 0.2f, 8, 2.0f, active ? Color{74, 154, 255, 255} : Color{58, 78, 98, 255});
 
-    const std::string display = value.empty() ? placeholder : value;
+    const std::string display = FitText(value.empty() ? placeholder : value, 18.0f, bounds.width - 24.0f);
     const Color textColor = value.empty() ? Color{120, 140, 160, 255} : RAYWHITE;
     DrawText(display.c_str(), static_cast<int>(bounds.x + 12), static_cast<int>(bounds.y + 10), 20, textColor);
 
@@ -180,37 +231,45 @@ void DrawHeader(const AppData& data, AppUi& ui) {
 
     const std::string currentDate = "Current date: " + EffectiveDate(data);
     DrawText(currentDate.c_str(), GetScreenWidth() - 250, 22, 20, Color{230, 241, 255, 255});
+    DrawText(data.simulation.enabled ? "Simulation mode" : "Live editing mode",
+             GetScreenWidth() - 250, 50, 18,
+             data.simulation.enabled ? Color{255, 212, 112, 255} : Color{145, 233, 176, 255});
 
     if (!ui.banner.empty() && GetTime() <= ui.bannerUntil) {
-        DrawRectangleRounded(Rectangle{480, 18, 420, 40}, 0.3f, 8, Color{15, 90, 70, 220});
-        DrawText(ui.banner.c_str(), 494, 28, 18, RAYWHITE);
+        DrawRectangleRounded(Rectangle{430, 18, 470, 40}, 0.3f, 8, Color{15, 90, 70, 220});
+        DrawText(FitText(ui.banner, 18.0f, 440.0f).c_str(), 444, 28, 18, RAYWHITE);
     }
 }
 
 void DrawLinesPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataFile) {
-    const Rectangle panel = Panel(20, 100, 300, GetScreenHeight() - 120, "Production lines");
-    float y = panel.y + 36;
+    const Rectangle panel = Panel(20, 100, 280, GetScreenHeight() - 120, "1. Production lines");
+    DrawText("Pick a line, then manage its equipment.", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + 44), 16, Color{180, 190, 200, 255});
+    float y = panel.y + 72;
 
     for (int index = 0; index < static_cast<int>(data.lines.size()); ++index) {
-        Rectangle selectRect{panel.x + 12, y, 160, 34};
-        Rectangle duplicateRect{panel.x + 180, y, 48, 34};
-        Rectangle deleteRect{panel.x + 236, y, 48, 34};
+        Rectangle selectRect{panel.x + 12, y, 150, 40};
+        Rectangle duplicateRect{panel.x + 170, y, 54, 40};
+        Rectangle deleteRect{panel.x + 232, y, 36, 40};
+        const std::string label = FitText(data.lines[index].name, 18.0f, 126.0f);
 
-        if (GuiButton(selectRect, data.lines[index].name.c_str())) {
+        if (GuiButton(selectRect, label.c_str())) {
             ui.selectedLine = index;
             ui.selectedEquipment = data.lines[index].equipment.empty() ? -1 : 0;
             ui.selectedItem = (ui.selectedEquipment >= 0 && !data.lines[index].equipment[0].items.empty()) ? 0 : -1;
             SyncRenameBuffers(data, ui);
         }
 
-        if (GuiButton(duplicateRect, "Dup") && !data.simulation.enabled) {
+        DrawText(TextFormat("%i eq.", static_cast<int>(data.lines[index].equipment.size())),
+                 static_cast<int>(selectRect.x), static_cast<int>(selectRect.y + 43), 14, Color{160, 170, 180, 255});
+
+        if (GuiButton(duplicateRect, "Copy") && !data.simulation.enabled) {
             ProductionLine copy = data.lines[index];
             copy.name += " Copy";
             data.lines.push_back(copy);
             PersistIfAllowed(data, dataFile, ui);
         }
 
-        if (GuiButton(deleteRect, "Del") && !data.simulation.enabled) {
+        if (GuiButton(deleteRect, "X") && !data.simulation.enabled) {
             data.lines.erase(data.lines.begin() + index);
             ClampSelections(data, ui);
             SyncRenameBuffers(data, ui);
@@ -222,12 +281,12 @@ void DrawLinesPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
             DrawRectangleLinesEx(selectRect, 2, Color{82, 168, 255, 255});
         }
 
-        y += 42;
+        y += 60;
     }
 
-    DrawText("Add line", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 154), 20, RAYWHITE);
-    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 124, 190, 40}, ui.newLineName, FocusField::NewLine, ui, "New line name");
-    if (GuiButton(Rectangle{panel.x + 210, panel.y + panel.height - 124, 74, 40}, "Add") && !ui.newLineName.empty()) {
+    DrawText("Add line", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 154), 18, RAYWHITE);
+    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 124, panel.width - 24, 40}, ui.newLineName, FocusField::NewLine, ui, "New line name");
+    if (GuiButton(Rectangle{panel.x + 12, panel.y + panel.height - 76, 90, 36}, "Add line") && !ui.newLineName.empty()) {
         if (!data.simulation.enabled) {
             data.lines.push_back(ProductionLine{ui.newLineName, {}});
             ui.selectedLine = static_cast<int>(data.lines.size()) - 1;
@@ -241,9 +300,8 @@ void DrawLinesPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
         }
     }
 
-    DrawText("Rename selected line", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 72), 20, RAYWHITE);
-    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 42, 190, 40}, ui.renameLineName, FocusField::RenameLine, ui, "Selected line");
-    if (GuiButton(Rectangle{panel.x + 210, panel.y + panel.height - 42, 74, 40}, "Save") &&
+    DrawInputBox(Rectangle{panel.x + 110, panel.y + panel.height - 76, panel.width - 122, 36}, ui.renameLineName, FocusField::RenameLine, ui, "Rename selected line");
+    if (GuiButton(Rectangle{panel.x + 12, panel.y + panel.height - 34, 90, 32}, "Save") &&
         ui.selectedLine >= 0 && ui.selectedLine < static_cast<int>(data.lines.size()) && !ui.renameLineName.empty()) {
         if (!data.simulation.enabled) {
             data.lines[ui.selectedLine].name = ui.renameLineName;
@@ -255,26 +313,31 @@ void DrawLinesPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
 }
 
 void DrawEquipmentPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataFile) {
-    const Rectangle panel = Panel(340, 100, 460, 280, "Equipment");
+    const Rectangle panel = Panel(320, 100, 360, GetScreenHeight() - 120, "2. Equipment");
     if (ui.selectedLine < 0 || ui.selectedLine >= static_cast<int>(data.lines.size())) {
-        DrawText("Create or select a production line to manage equipment.", 356, 150, 20, Color{180, 190, 200, 255});
+        DrawText("Select a production line to unlock equipment.", 336, 150, 18, Color{180, 190, 200, 255});
         return;
     }
 
     auto& line = data.lines[ui.selectedLine];
-    float y = panel.y + 36;
+    DrawText(FitText(line.name, 20.0f, panel.width - 24).c_str(), static_cast<int>(panel.x + 12), static_cast<int>(panel.y + 46), 20, RAYWHITE);
+    float y = panel.y + 84;
 
     for (int index = 0; index < static_cast<int>(line.equipment.size()); ++index) {
-        Rectangle selectRect{panel.x + 12, y, 270, 34};
-        Rectangle deleteRect{panel.x + 290, y, 48, 34};
+        Rectangle selectRect{panel.x + 12, y, 290, 40};
+        Rectangle deleteRect{panel.x + 310, y, 36, 40};
+        const std::string label = FitText(line.equipment[index].name, 18.0f, 266.0f);
 
-        if (GuiButton(selectRect, line.equipment[index].name.c_str())) {
+        if (GuiButton(selectRect, label.c_str())) {
             ui.selectedEquipment = index;
             ui.selectedItem = line.equipment[index].items.empty() ? -1 : 0;
             SyncRenameBuffers(data, ui);
         }
 
-        if (GuiButton(deleteRect, "Del") && !data.simulation.enabled) {
+        DrawText(TextFormat("%i items", static_cast<int>(line.equipment[index].items.size())),
+                 static_cast<int>(selectRect.x), static_cast<int>(selectRect.y + 43), 14, Color{160, 170, 180, 255});
+
+        if (GuiButton(deleteRect, "X") && !data.simulation.enabled) {
             line.equipment.erase(line.equipment.begin() + index);
             ClampSelections(data, ui);
             SyncRenameBuffers(data, ui);
@@ -286,12 +349,12 @@ void DrawEquipmentPanel(AppData& data, AppUi& ui, const std::filesystem::path& d
             DrawRectangleLinesEx(selectRect, 2, Color{82, 168, 255, 255});
         }
 
-        y += 42;
+        y += 60;
     }
 
-    DrawText("Add equipment", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 108), 20, RAYWHITE);
-    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 78, 260, 40}, ui.newEquipmentName, FocusField::NewEquipment, ui, "New equipment name");
-    if (GuiButton(Rectangle{panel.x + 282, panel.y + panel.height - 78, 60, 40}, "Add") && !ui.newEquipmentName.empty()) {
+    DrawText("Add equipment", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 154), 18, RAYWHITE);
+    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 124, panel.width - 24, 40}, ui.newEquipmentName, FocusField::NewEquipment, ui, "New equipment name");
+    if (GuiButton(Rectangle{panel.x + 12, panel.y + panel.height - 76, 124, 36}, "Add equipment") && !ui.newEquipmentName.empty()) {
         if (!data.simulation.enabled) {
             line.equipment.push_back(Equipment{ui.newEquipmentName, {}});
             ui.selectedEquipment = static_cast<int>(line.equipment.size()) - 1;
@@ -304,8 +367,8 @@ void DrawEquipmentPanel(AppData& data, AppUi& ui, const std::filesystem::path& d
         }
     }
 
-    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 30, 260, 40}, ui.renameEquipmentName, FocusField::RenameEquipment, ui, "Rename selected equipment");
-    if (GuiButton(Rectangle{panel.x + 282, panel.y + panel.height - 30, 60, 40}, "Save") &&
+    DrawInputBox(Rectangle{panel.x + 146, panel.y + panel.height - 76, panel.width - 158, 36}, ui.renameEquipmentName, FocusField::RenameEquipment, ui, "Rename selected equipment");
+    if (GuiButton(Rectangle{panel.x + 12, panel.y + panel.height - 34, 124, 32}, "Save name") &&
         ui.selectedEquipment >= 0 && ui.selectedEquipment < static_cast<int>(line.equipment.size()) && !ui.renameEquipmentName.empty()) {
         if (!data.simulation.enabled) {
             line.equipment[ui.selectedEquipment].name = ui.renameEquipmentName;
@@ -317,32 +380,39 @@ void DrawEquipmentPanel(AppData& data, AppUi& ui, const std::filesystem::path& d
 }
 
 void DrawItemsPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataFile) {
-    const Rectangle panel = Panel(340, 400, 700, GetScreenHeight() - 420, "Maintenance items");
+    const Rectangle panel = Panel(700, 100, 540, GetScreenHeight() - 120, "3. Maintenance items");
 
     if (ui.selectedLine < 0 || ui.selectedLine >= static_cast<int>(data.lines.size()) ||
         ui.selectedEquipment < 0 || ui.selectedEquipment >= static_cast<int>(data.lines[ui.selectedLine].equipment.size())) {
-        DrawText("Select a piece of equipment to manage maintenance items.", 356, 450, 20, Color{180, 190, 200, 255});
+        DrawText("Select equipment to manage maintenance items.", 716, 150, 18, Color{180, 190, 200, 255});
         return;
     }
 
     auto& equipment = data.lines[ui.selectedLine].equipment[ui.selectedEquipment];
-    float y = panel.y + 36;
-    const float visibleBottom = panel.y + panel.height - 170;
+    DrawText(FitText(equipment.name, 20.0f, panel.width - 24).c_str(), static_cast<int>(panel.x + 12), static_cast<int>(panel.y + 46), 20, RAYWHITE);
+    float y = panel.y + 84;
+    const float visibleBottom = panel.y + panel.height - 176;
 
     for (int index = 0; index < static_cast<int>(equipment.items.size()) && y < visibleBottom; ++index) {
         auto& item = equipment.items[index];
         const int daysSince = DaysBetween(item.lastCheckedDate, EffectiveDate(data));
         std::string status = item.checkedToday ? "done today" : (daysSince > item.periodDays ? "overdue" : (daysSince == item.periodDays ? "due today" : "scheduled"));
-        std::string label = item.name + " | every " + std::to_string(item.periodDays) + " days | last " + item.lastCheckedDate + " | " + status;
+        const std::string title = FitText(item.name, 18.0f, 260.0f);
+        const std::string meta = FitText("every " + std::to_string(item.periodDays) + " days | last " + item.lastCheckedDate, 15.0f, 300.0f);
 
-        Rectangle selectRect{panel.x + 12, y, 470, 34};
-        Rectangle checkRect{panel.x + 490, y, 90, 34};
-        Rectangle deleteRect{panel.x + 588, y, 48, 34};
+        Rectangle selectRect{panel.x + 12, y, 318, 54};
+        Rectangle checkRect{panel.x + 340, y + 7, 86, 40};
+        Rectangle deleteRect{panel.x + 436, y + 7, 36, 40};
 
-        if (GuiButton(selectRect, label.c_str())) {
+        if (GuiButton(selectRect, title.c_str())) {
             ui.selectedItem = index;
             SyncRenameBuffers(data, ui);
         }
+
+        DrawText(meta.c_str(), static_cast<int>(selectRect.x), static_cast<int>(selectRect.y + 58), 15, Color{160, 170, 180, 255});
+        DrawText(status.c_str(), static_cast<int>(panel.x + panel.width - 110), static_cast<int>(selectRect.y + 15), 16,
+                 item.checkedToday ? Color{145, 233, 176, 255} : (daysSince > item.periodDays ? Color{255, 132, 132, 255} :
+                 (daysSince == item.periodDays ? Color{255, 212, 112, 255} : Color{180, 190, 200, 255})));
 
         if (GuiButton(checkRect, item.checkedToday ? "Undo" : "Done")) {
             if (!data.simulation.enabled) {
@@ -361,7 +431,7 @@ void DrawItemsPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
             }
         }
 
-        if (GuiButton(deleteRect, "Del")) {
+        if (GuiButton(deleteRect, "X")) {
             if (!data.simulation.enabled) {
                 equipment.items.erase(equipment.items.begin() + index);
                 ClampSelections(data, ui);
@@ -377,13 +447,13 @@ void DrawItemsPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
             DrawRectangleLinesEx(selectRect, 2, Color{82, 168, 255, 255});
         }
 
-        y += 42;
+        y += 80;
     }
 
-    DrawText("Add item", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 118), 20, RAYWHITE);
-    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 88, 240, 40}, ui.newItemName, FocusField::NewItem, ui, "Maintenance item name");
-    GuiSpinner(Rectangle{panel.x + 260, panel.y + panel.height - 88, 120, 40}, "Days", &ui.newItemPeriod, 1, 365, true);
-    if (GuiButton(Rectangle{panel.x + 388, panel.y + panel.height - 88, 70, 40}, "Add") && !ui.newItemName.empty()) {
+    DrawText("Add item", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 126), 18, RAYWHITE);
+    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 96, 250, 40}, ui.newItemName, FocusField::NewItem, ui, "Maintenance item name");
+    GuiSpinner(Rectangle{panel.x + 270, panel.y + panel.height - 96, 100, 40}, "Days", &ui.newItemPeriod, 1, 365, true);
+    if (GuiButton(Rectangle{panel.x + 378, panel.y + panel.height - 96, 80, 40}, "Add") && !ui.newItemName.empty()) {
         if (!data.simulation.enabled) {
             equipment.items.push_back(MaintenanceItem{ui.newItemName, ui.newItemPeriod, "1970-01-01", false});
             ui.selectedItem = static_cast<int>(equipment.items.size()) - 1;
@@ -396,10 +466,10 @@ void DrawItemsPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
         }
     }
 
-    DrawText("Edit selected item", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 56), 20, RAYWHITE);
-    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 26, 240, 40}, ui.renameItemName, FocusField::RenameItem, ui, "Selected item");
-    GuiSpinner(Rectangle{panel.x + 260, panel.y + panel.height - 26, 120, 40}, "Days", &ui.renameItemPeriod, 1, 365, true);
-    if (GuiButton(Rectangle{panel.x + 388, panel.y + panel.height - 26, 70, 40}, "Save") &&
+    DrawText("Edit selected item", static_cast<int>(panel.x + 12), static_cast<int>(panel.y + panel.height - 52), 18, RAYWHITE);
+    DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 24, 250, 40}, ui.renameItemName, FocusField::RenameItem, ui, "Selected item");
+    GuiSpinner(Rectangle{panel.x + 270, panel.y + panel.height - 24, 100, 40}, "Days", &ui.renameItemPeriod, 1, 365, true);
+    if (GuiButton(Rectangle{panel.x + 378, panel.y + panel.height - 24, 80, 40}, "Save") &&
         ui.selectedItem >= 0 && ui.selectedItem < static_cast<int>(equipment.items.size()) && !ui.renameItemName.empty()) {
         if (!data.simulation.enabled) {
             equipment.items[ui.selectedItem].name = ui.renameItemName;
@@ -412,7 +482,7 @@ void DrawItemsPanel(AppData& data, AppUi& ui, const std::filesystem::path& dataF
 }
 
 void DrawDashboard(AppData& data, AppUi& ui, const std::filesystem::path& dataFile) {
-    const Rectangle panel = Panel(1060, 100, GetScreenWidth() - 1080, GetScreenHeight() - 120, "Dashboard");
+    const Rectangle panel = Panel(1260, 100, GetScreenWidth() - 1280, GetScreenHeight() - 120, "4. Dashboard");
     const DueSummary summary = BuildDueSummary(data);
     int equipmentCount = 0;
     int itemCount = 0;
@@ -430,21 +500,25 @@ void DrawDashboard(AppData& data, AppUi& ui, const std::filesystem::path& dataFi
         SetBanner(ui, data.simulation.enabled ? "Simulation mode enabled. Editing is now locked." : "Simulation mode disabled.");
     }
 
-    GuiSpinner(Rectangle{panel.x + 16, panel.y + 80, 100, 34}, "Year", &data.simulation.year, 2020, 2100, true);
-    GuiSpinner(Rectangle{panel.x + 126, panel.y + 80, 70, 34}, "Month", &data.simulation.month, 1, 12, true);
-    GuiSpinner(Rectangle{panel.x + 206, panel.y + 80, 70, 34}, "Day", &data.simulation.day, 1, 31, true);
+    DrawText(TextFormat("Lines: %i", static_cast<int>(data.lines.size())), static_cast<int>(panel.x + 16), static_cast<int>(panel.y + 86), 18, Color{180, 190, 200, 255});
+    DrawText(TextFormat("Equipment: %i", equipmentCount), static_cast<int>(panel.x + 16), static_cast<int>(panel.y + 110), 18, Color{180, 190, 200, 255});
+    DrawText(TextFormat("Items: %i", itemCount), static_cast<int>(panel.x + 16), static_cast<int>(panel.y + 134), 18, Color{180, 190, 200, 255});
 
-    if (GuiButton(Rectangle{panel.x + 286, panel.y + 80, 120, 34}, "Jump to today")) {
+    GuiSpinner(Rectangle{panel.x + 16, panel.y + 168, 82, 34}, "Year", &data.simulation.year, 2020, 2100, true);
+    GuiSpinner(Rectangle{panel.x + 104, panel.y + 168, 56, 34}, "Month", &data.simulation.month, 1, 12, true);
+    GuiSpinner(Rectangle{panel.x + 166, panel.y + 168, 56, 34}, "Day", &data.simulation.day, 1, 31, true);
+
+    if (GuiButton(Rectangle{panel.x + 16, panel.y + 210, panel.width - 32, 34}, "Jump to today")) {
         ResetSimulationToToday(data);
         RefreshStatuses(data);
         SetBanner(ui, "Simulation date reset to today.");
     }
 
-    if (GuiButton(Rectangle{panel.x + 16, panel.y + 124, 120, 34}, "Refresh status")) {
+    if (GuiButton(Rectangle{panel.x + 16, panel.y + 252, panel.width - 32, 34}, "Refresh status")) {
         RefreshStatuses(data);
     }
 
-    if (GuiButton(Rectangle{panel.x + 146, panel.y + 124, 120, 34}, "Load sample")) {
+    if (GuiButton(Rectangle{panel.x + 16, panel.y + 294, panel.width - 32, 34}, "Load sample")) {
         if (!data.simulation.enabled) {
             data = BuildSampleData();
             RefreshStatuses(data);
@@ -459,30 +533,26 @@ void DrawDashboard(AppData& data, AppUi& ui, const std::filesystem::path& dataFi
         }
     }
 
-    DrawText(TextFormat("Lines: %i", static_cast<int>(data.lines.size())), static_cast<int>(panel.x + 16), static_cast<int>(panel.y + 166), 18, Color{180, 190, 200, 255});
-    DrawText(TextFormat("Equipment: %i", equipmentCount), static_cast<int>(panel.x + 116), static_cast<int>(panel.y + 166), 18, Color{180, 190, 200, 255});
-    DrawText(TextFormat("Items: %i", itemCount), static_cast<int>(panel.x + 246), static_cast<int>(panel.y + 166), 18, Color{180, 190, 200, 255});
-
-    DrawText("Due today", static_cast<int>(panel.x + 16), static_cast<int>(panel.y + 194), 24, RAYWHITE);
-    float y = panel.y + 228;
+    DrawText("Due today", static_cast<int>(panel.x + 16), static_cast<int>(panel.y + 346), 22, RAYWHITE);
+    float y = panel.y + 378;
     if (summary.dueToday.empty()) {
         DrawText("Nothing is due today.", static_cast<int>(panel.x + 16), static_cast<int>(y), 18, Color{180, 190, 200, 255});
     } else {
         for (const auto& label : summary.dueToday) {
-            if (y > panel.y + panel.height - 180) break;
-            DrawText(label.c_str(), static_cast<int>(panel.x + 16), static_cast<int>(y), 18, Color{252, 210, 110, 255});
-            y += 24;
+            if (y > panel.y + panel.height - 170) break;
+            DrawText(FitText(label, 16.0f, panel.width - 32).c_str(), static_cast<int>(panel.x + 16), static_cast<int>(y), 16, Color{252, 210, 110, 255});
+            y += 22;
         }
     }
 
-    DrawText("Overdue", static_cast<int>(panel.x + 16), static_cast<int>(panel.y + panel.height - 150), 24, RAYWHITE);
+    DrawText("Overdue", static_cast<int>(panel.x + 16), static_cast<int>(panel.y + panel.height - 150), 22, RAYWHITE);
     y = panel.y + panel.height - 116;
     if (summary.overdue.empty()) {
         DrawText("No overdue items.", static_cast<int>(panel.x + 16), static_cast<int>(y), 18, Color{180, 190, 200, 255});
     } else {
         for (const auto& label : summary.overdue) {
             if (y > panel.y + panel.height - 20) break;
-            DrawText(label.c_str(), static_cast<int>(panel.x + 16), static_cast<int>(y), 18, Color{255, 130, 120, 255});
+            DrawText(FitText(label, 16.0f, panel.width - 32).c_str(), static_cast<int>(panel.x + 16), static_cast<int>(y), 16, Color{255, 130, 120, 255});
             y += 22;
         }
     }
@@ -503,6 +573,7 @@ int main(int argc, char** argv) {
     InitWindow(kWindowWidth, kWindowHeight, "Factor Manager");
     SetWindowMinSize(kWindowMinWidth, kWindowMinHeight);
     SetTargetFPS(60);
+    LoadUiFont(root);
 
     AppData data = LoadAppData(dataFile);
     RefreshStatuses(data);
@@ -535,6 +606,7 @@ int main(int argc, char** argv) {
         EndDrawing();
     }
 
+    UnloadUiFont();
     CloseWindow();
     return 0;
 }

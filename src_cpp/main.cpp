@@ -54,6 +54,7 @@ struct AppUi {
     float itemsScroll = 0.0f;
     float dueAlertsScroll = 0.0f;
     float overdueAlertsScroll = 0.0f;
+    bool hideDashboardInSimulation = false;
     FocusField focusedField = FocusField::None;
     std::string newLineName;
     std::string renameLineName;
@@ -217,6 +218,33 @@ std::string BuildAlertTail(const MaintenanceAlert& alert, bool overdue) {
         return T1("summary.overdue_days", std::to_string(alert.daysLate));
     }
     return T("summary.due_now");
+}
+
+std::string DashboardToggleLabel(const AppData& data, const AppUi& ui) {
+    if (!data.simulation.enabled) {
+        return "";
+    }
+    const bool isTraditionalChinese =
+        !g_localizer.Empty() &&
+        g_localizer.ActiveIndex() >= 0 &&
+        g_localizer.ActiveIndex() < static_cast<int>(g_localizer.Languages().size()) &&
+        g_localizer.Languages()[g_localizer.ActiveIndex()].code == "zh-TW";
+    if (isTraditionalChinese) {
+        return ui.hideDashboardInSimulation ? "顯示儀表板" : "隱藏儀表板";
+    }
+    return ui.hideDashboardInSimulation ? "Show dashboard" : "Hide dashboard";
+}
+
+std::string SimulationToggleLabel(const AppData& data) {
+    const bool isTraditionalChinese =
+        !g_localizer.Empty() &&
+        g_localizer.ActiveIndex() >= 0 &&
+        g_localizer.ActiveIndex() < static_cast<int>(g_localizer.Languages().size()) &&
+        g_localizer.Languages()[g_localizer.ActiveIndex()].code == "zh-TW";
+    if (isTraditionalChinese) {
+        return data.simulation.enabled ? "關閉模擬模式" : "開啟模擬模式";
+    }
+    return data.simulation.enabled ? "Disable simulation" : "Enable simulation";
 }
 
 std::string Utf8FromCodepoint(int codepoint) {
@@ -563,13 +591,29 @@ void DrawAlertsPanel(const UiLayout& layout, const AppData& data, AppUi& ui) {
     DrawSingleAlertFeed(overdueBounds, T("label.overdue"), summary.overdue, true, T("label.nothing_overdue"), Color{239, 115, 115, 255}, ui.overdueAlertsScroll);
 }
 
-void DrawHeader(const AppData& data, AppUi& ui) {
+void DrawHeader(AppData& data, AppUi& ui) {
     const float headerHeight = ScalePx(88.0f);
     DrawRectangleGradientH(0, 0, GetScreenWidth(), static_cast<int>(headerHeight), Color{9, 26, 43, 255}, Color{12, 50, 88, 255});
     DrawUiText(T("app.title"), ScalePx(24.0f), ScalePx(14.0f), 38.0f, RAYWHITE, true);
     DrawUiText(T("app.subtitle"), ScalePx(26.0f), ScalePx(54.0f), 18.0f, Color{187, 214, 239, 255});
 
     const std::string currentDate = T1("header.current_date", EffectiveDate(data));
+    const std::string simulationToggle = SimulationToggleLabel(data);
+    const float simulationToggleWidth = std::max(ScalePx(168.0f), MeasureUiText(simulationToggle, 15.0f, true) + ScalePx(26.0f));
+    const Rectangle simulationToggleRect{
+        static_cast<float>(GetScreenWidth()) - ScalePx(280.0f) - simulationToggleWidth - ScalePx(28.0f),
+        ScalePx(16.0f),
+        simulationToggleWidth,
+        ScalePx(28.0f)
+    };
+    if (GuiButton(simulationToggleRect, simulationToggle.c_str())) {
+        data.simulation.enabled = !data.simulation.enabled;
+        if (!data.simulation.enabled) {
+            ui.hideDashboardInSimulation = false;
+        }
+        RefreshStatuses(data);
+        SetBanner(ui, data.simulation.enabled ? T("banner.simulation_enabled") : T("banner.simulation_disabled"));
+    }
     DrawUiText(currentDate, static_cast<float>(GetScreenWidth()) - ScalePx(280.0f), ScalePx(20.0f), 18.0f, Color{230, 241, 255, 255});
     DrawUiText(data.simulation.enabled ? T("header.mode.simulation") : T("header.mode.live"),
                static_cast<float>(GetScreenWidth()) - ScalePx(280.0f), ScalePx(48.0f), 17.0f,
@@ -588,6 +632,22 @@ void DrawHeader(const AppData& data, AppUi& ui) {
             DrawRectangleLinesEx(Rectangle{languageX, ScalePx(44.0f), static_cast<float>(buttonWidth), ScalePx(30.0f)}, std::max(1.4f, ScalePx(1.6f)), Color{82, 168, 255, 255});
         }
         languageX += static_cast<float>(buttonWidth) + ScalePx(8.0f);
+    }
+
+    if (data.simulation.enabled) {
+        const std::string dashboardToggle = DashboardToggleLabel(data, ui);
+        const float toggleWidth = std::max(ScalePx(150.0f), MeasureUiText(dashboardToggle, 15.0f, true) + ScalePx(22.0f));
+        const Rectangle toggleRect{
+            static_cast<float>(GetScreenWidth()) - ScalePx(280.0f) - toggleWidth - ScalePx(20.0f),
+            ScalePx(44.0f),
+            toggleWidth,
+            ScalePx(30.0f)
+        };
+        if (GuiButton(toggleRect, dashboardToggle.c_str())) {
+            ui.hideDashboardInSimulation = !ui.hideDashboardInSimulation;
+        }
+    } else {
+        ui.hideDashboardInSimulation = false;
     }
 
     if (!ui.banner.empty() && GetTime() <= ui.bannerUntil) {
@@ -996,7 +1056,7 @@ int main(int argc, char** argv) {
         UpdateUiScale();
         RefreshStatuses(data);
         ClampSelections(data, ui);
-        const UiLayout layout = BuildLayout(data.simulation.enabled);
+        const UiLayout layout = BuildLayout(data.simulation.enabled && ui.hideDashboardInSimulation);
 
         BeginDrawing();
         ClearBackground(Color{15, 20, 29, 255});

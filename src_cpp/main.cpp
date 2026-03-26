@@ -192,6 +192,11 @@ std::filesystem::path ResolveDataFile(const std::filesystem::path& root) {
     return preferred;
 }
 
+void OpenFolderInExplorer(const std::filesystem::path& folder) {
+    const std::string command = "explorer \"" + folder.string() + "\"";
+    std::system(command.c_str());
+}
+
 UiLayout BuildLayout() {
     const float margin = 20.0f;
     const float gap = 20.0f;
@@ -717,21 +722,25 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
     DrawInfoCard(Rectangle{panel.x + 16, panel.y + 226, panel.width - 32, 62},
                  T("label.items_title"), std::to_string(itemCount), Color{241, 192, 84, 255});
 
-    float actionsTop = panel.y + 302;
-    if (data.simulation.enabled) {
-        DrawUiText(T("header.mode.simulation"), panel.x + 16, actionsTop, 18.0f, Color{255, 212, 112, 255});
-        const float spinnerGap = 8.0f;
-        const float spinnerWidth = std::max(56.0f, (panel.width - 32.0f - spinnerGap * 2.0f) / 3.0f);
-        GuiSpinner(Rectangle{panel.x + 16, actionsTop + 24, spinnerWidth, 34}, T("label.year").c_str(), &data.simulation.year, 2020, 2100, true);
-        GuiSpinner(Rectangle{panel.x + 16 + spinnerWidth + spinnerGap, actionsTop + 24, spinnerWidth, 34}, T("label.month").c_str(), &data.simulation.month, 1, 12, true);
-        GuiSpinner(Rectangle{panel.x + 16 + (spinnerWidth + spinnerGap) * 2.0f, actionsTop + 24, spinnerWidth, 34}, T("label.day").c_str(), &data.simulation.day, 1, 31, true);
+    DrawUiText(T("label.data_file"), panel.x + 16, panel.y + 302, 16.0f, Color{160, 170, 180, 255});
+    DrawUiText(FitText(dataFile.string(), 14.0f, panel.width - 32), panel.x + 16, panel.y + 324, 14.0f, RAYWHITE);
+    if (GuiButton(Rectangle{panel.x + 16, panel.y + 348, panel.width - 32, 34}, T("button.open_data_folder").c_str())) {
+        OpenFolderInExplorer(dataFile.parent_path());
+    }
 
-        if (GuiButton(Rectangle{panel.x + 16, actionsTop + 68, panel.width - 32, 34}, T("button.jump_today").c_str())) {
+    float actionsTop = panel.y + 396;
+    if (data.simulation.enabled) {
+        DrawUiText(T("label.simulation_date"), panel.x + 16, actionsTop, 18.0f, Color{255, 212, 112, 255});
+        GuiSpinner(Rectangle{panel.x + 16, actionsTop + 28, panel.width - 32, 34}, T("label.year").c_str(), &data.simulation.year, 2020, 2100, true);
+        GuiSpinner(Rectangle{panel.x + 16, actionsTop + 70, panel.width - 32, 34}, T("label.month").c_str(), &data.simulation.month, 1, 12, true);
+        GuiSpinner(Rectangle{panel.x + 16, actionsTop + 112, panel.width - 32, 34}, T("label.day").c_str(), &data.simulation.day, 1, 31, true);
+
+        if (GuiButton(Rectangle{panel.x + 16, actionsTop + 156, panel.width - 32, 34}, T("button.jump_today").c_str())) {
             ResetSimulationToToday(data);
             RefreshStatuses(data);
             SetBanner(ui, T("banner.simulation_today"));
         }
-        actionsTop += 110.0f;
+        actionsTop += 198.0f;
     }
 
     if (GuiButton(Rectangle{panel.x + 16, actionsTop, panel.width - 32, 34}, T("button.refresh").c_str())) {

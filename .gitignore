@@ -1,0 +1,17 @@
+build/
+build_manual/
+obj/
+output/
+legacy_build/
+*.o
+*.obj
+*.exe
+*.dll
+*.zip
+*.log
+*.cache
+*.tmp
+.vscode/
+.idea/
+!README.md
+data/*.bak

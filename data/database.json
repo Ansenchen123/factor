@@ -1,0 +1,57 @@
+{
+  "last_date": "2026-01-22",
+  "lines": [
+    {
+      "name": "Line A",
+      "equipments": [
+        {
+          "name": "Packaging Station",
+          "scroll_offset": 0,
+          "items": [
+            {
+              "name": "Lubrication",
+              "period": 7,
+              "last_checked": "2026-01-22",
+              "is_checked": true
+            },
+            {
+              "name": "Sensor Check",
+              "period": 14,
+              "last_checked": "2026-01-10",
+              "is_checked": false
+            }
+          ]
+        },
+        {
+          "name": "Sealing Unit",
+          "scroll_offset": 0,
+          "items": [
+            {
+              "name": "Temperature Calibration",
+              "period": 30,
+              "last_checked": "2025-12-20",
+              "is_checked": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Line B",
+      "equipments": [
+        {
+          "name": "Inspection Camera",
+          "scroll_offset": 0,
+          "items": [
+            {
+              "name": "Lens Cleaning",
+              "period": 5,
+              "last_checked": "2026-01-18",
+              "is_checked": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

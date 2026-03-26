@@ -52,6 +52,7 @@ struct AppUi {
     float linesScroll = 0.0f;
     float equipmentScroll = 0.0f;
     float itemsScroll = 0.0f;
+    float dashboardAlertsScroll = 0.0f;
     FocusField focusedField = FocusField::None;
     std::string newLineName;
     std::string renameLineName;
@@ -502,6 +503,39 @@ float DrawAlertSection(Rectangle bounds, const std::string& title, const std::ve
     return y;
 }
 
+float EstimateAlertSectionHeight(const std::vector<MaintenanceAlert>& alerts, float width) {
+    float height = ScalePx(34.0f);
+    if (alerts.empty()) {
+        return height + ScalePx(28.0f);
+    }
+
+    for (const auto& alert : alerts) {
+        const std::vector<std::string> headlineLines = WrapTextLines(BuildAlertHeadline(alert), 15.5f, width - ScalePx(24.0f), true);
+        const float entryHeight = ScalePx(18.0f) + static_cast<float>(headlineLines.size()) * ScalePx(22.0f) + ScalePx(22.0f);
+        height += entryHeight + ScalePx(10.0f);
+    }
+
+    return height;
+}
+
+void DrawAlertsFeed(Rectangle bounds, const DueSummary& summary, AppUi& ui) {
+    const float totalContentHeight =
+        EstimateAlertSectionHeight(summary.dueToday, bounds.width) +
+        EstimateAlertSectionHeight(summary.overdue, bounds.width) +
+        ScalePx(14.0f);
+
+    HandleWheelScroll(bounds, totalContentHeight, ui.dashboardAlertsScroll);
+
+    BeginScissorMode(static_cast<int>(bounds.x), static_cast<int>(bounds.y), static_cast<int>(bounds.width), static_cast<int>(bounds.height));
+    float y = bounds.y - ui.dashboardAlertsScroll;
+    y = DrawAlertSection(Rectangle{bounds.x, y, bounds.width, totalContentHeight}, T("label.due_today"), summary.dueToday, false, T("label.nothing_due"), Color{241, 192, 84, 255});
+    y += ScalePx(14.0f);
+    DrawAlertSection(Rectangle{bounds.x, y, bounds.width, totalContentHeight}, T("label.overdue"), summary.overdue, true, T("label.nothing_overdue"), Color{239, 115, 115, 255});
+    EndScissorMode();
+
+    DrawScrollHint(bounds, totalContentHeight, ui.dashboardAlertsScroll);
+}
+
 void DrawHeader(const AppData& data, AppUi& ui) {
     const float headerHeight = ScalePx(88.0f);
     DrawRectangleGradientH(0, 0, GetScreenWidth(), static_cast<int>(headerHeight), Color{9, 26, 43, 255}, Color{12, 50, 88, 255});
@@ -883,14 +917,14 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
         }
     }
 
-    const float alertsTop = actionsTop + ScalePx(98.0f);
-    const float alertsHeight = panel.y + panel.height - alertsTop - ScalePx(16.0f);
-    const float dueHeight = std::max(ScalePx(110.0f), alertsHeight * 0.30f);
-    const Rectangle dueArea{panel.x + ScalePx(16.0f), alertsTop, panel.width - ScalePx(32.0f), dueHeight};
-    DrawAlertSection(dueArea, T("label.due_today"), summary.dueToday, false, T("label.nothing_due"), Color{241, 192, 84, 255});
-
-    const Rectangle overdueArea{panel.x + ScalePx(16.0f), alertsTop + dueHeight + ScalePx(12.0f), panel.width - ScalePx(32.0f), alertsHeight - dueHeight - ScalePx(12.0f)};
-    DrawAlertSection(overdueArea, T("label.overdue"), summary.overdue, true, T("label.nothing_overdue"), Color{239, 115, 115, 255});
+    const float alertsTop = actionsTop + ScalePx(96.0f);
+    const Rectangle alertsArea{
+        panel.x + ScalePx(16.0f),
+        alertsTop,
+        panel.width - ScalePx(32.0f),
+        panel.y + panel.height - alertsTop - ScalePx(16.0f)
+    };
+    DrawAlertsFeed(alertsArea, summary, ui);
 }
 
 }  // namespace

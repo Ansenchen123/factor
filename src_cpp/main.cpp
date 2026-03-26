@@ -42,6 +42,9 @@ struct AppUi {
     int selectedLine = -1;
     int selectedEquipment = -1;
     int selectedItem = -1;
+    float linesScroll = 0.0f;
+    float equipmentScroll = 0.0f;
+    float itemsScroll = 0.0f;
     FocusField focusedField = FocusField::None;
     std::string newLineName;
     std::string renameLineName;
@@ -217,6 +220,35 @@ void ClampSelections(const AppData& data, AppUi& ui) {
     ui.selectedItem = std::clamp(ui.selectedItem, 0, static_cast<int>(equipment.items.size()) - 1);
 }
 
+void HandleWheelScroll(Rectangle bounds, float contentHeight, float& scrollOffset) {
+    if (!CheckCollisionPointRec(GetMousePosition(), bounds)) {
+        return;
+    }
+
+    const float wheel = GetMouseWheelMove();
+    if (wheel == 0.0f) {
+        return;
+    }
+
+    const float maxScroll = std::max(0.0f, contentHeight - bounds.height);
+    scrollOffset = std::clamp(scrollOffset - wheel * 32.0f, 0.0f, maxScroll);
+}
+
+void DrawScrollHint(Rectangle bounds, float contentHeight, float scrollOffset) {
+    if (contentHeight <= bounds.height) {
+        return;
+    }
+
+    const float trackHeight = bounds.height;
+    const float thumbHeight = std::max(42.0f, trackHeight * (bounds.height / contentHeight));
+    const float travel = std::max(1.0f, trackHeight - thumbHeight);
+    const float maxScroll = std::max(1.0f, contentHeight - bounds.height);
+    const float thumbY = bounds.y + (scrollOffset / maxScroll) * travel;
+
+    DrawRectangleRounded(Rectangle{bounds.x + bounds.width - 6, bounds.y, 4, trackHeight}, 0.5f, 4, Color{48, 60, 76, 180});
+    DrawRectangleRounded(Rectangle{bounds.x + bounds.width - 7, thumbY, 6, thumbHeight}, 0.5f, 4, Color{106, 139, 175, 220});
+}
+
 void HandleTextInput(std::string& value, std::size_t maxLength) {
     int key = GetCharPressed();
     while (key > 0) {
@@ -288,6 +320,14 @@ Rectangle Panel(float x, float y, float width, float height, const char* title) 
     return rect;
 }
 
+void DrawInfoCard(Rectangle bounds, const std::string& title, const std::string& value, Color accent) {
+    DrawRectangleRounded(bounds, 0.18f, 8, Color{24, 34, 46, 255});
+    DrawRectangleRoundedLines(bounds, 0.18f, 8, 1.5f, Color{60, 78, 102, 255});
+    DrawRectangleRounded(Rectangle{bounds.x, bounds.y, 5, bounds.height}, 0.3f, 4, accent);
+    DrawUiText(title, bounds.x + 14, bounds.y + 10, 15.0f, Color{160, 170, 180, 255});
+    DrawUiText(value, bounds.x + 14, bounds.y + 34, 22.0f, RAYWHITE);
+}
+
 void DrawHeader(const AppData& data, AppUi& ui) {
     DrawRectangleGradientH(0, 0, GetScreenWidth(), 84, Color{9, 26, 43, 255}, Color{12, 50, 88, 255});
     DrawUiText(T("app.title"), 24, 18, 34.0f, RAYWHITE);
@@ -324,7 +364,10 @@ void DrawLinesPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
     const std::string panelTitle = T("panel.lines");
     const Rectangle panel = Panel(layout.lines.x, layout.lines.y, layout.lines.width, layout.lines.height, panelTitle.c_str());
     DrawUiText(T("panel.lines.hint"), panel.x + 12, panel.y + 44, 16.0f, Color{180, 190, 200, 255});
-    float y = panel.y + 72;
+    const Rectangle listArea{panel.x + 8, panel.y + 72, panel.width - 8, panel.height - 244};
+    const float contentHeight = static_cast<float>(data.lines.size()) * 60.0f;
+    HandleWheelScroll(listArea, contentHeight, ui.linesScroll);
+    float y = listArea.y - ui.linesScroll;
 
     for (int index = 0; index < static_cast<int>(data.lines.size()); ++index) {
         const float actionWidth = 44.0f;
@@ -333,6 +376,11 @@ void DrawLinesPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
         Rectangle duplicateRect{selectRect.x + selectRect.width + 8, y, copyWidth, 40};
         Rectangle deleteRect{duplicateRect.x + duplicateRect.width + 8, y, actionWidth, 40};
         const std::string label = FitText(data.lines[index].name, 18.0f, selectRect.width - 20.0f);
+
+        if (deleteRect.y + deleteRect.height < listArea.y || selectRect.y > listArea.y + listArea.height) {
+            y += 60;
+            continue;
+        }
 
         if (GuiButton(selectRect, label.c_str())) {
             ui.selectedLine = index;
@@ -365,6 +413,7 @@ void DrawLinesPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 
         y += 60;
     }
+    DrawScrollHint(listArea, contentHeight, ui.linesScroll);
 
     DrawUiText(T("label.add_line"), panel.x + 12, panel.y + panel.height - 154, 18.0f, RAYWHITE);
     DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 124, panel.width - 24, 40}, ui.newLineName, FocusField::NewLine, ui, T("placeholder.new_line"));
@@ -405,12 +454,20 @@ void DrawEquipmentPanel(const UiLayout& layout, AppData& data, AppUi& ui, const 
 
     auto& line = data.lines[ui.selectedLine];
     DrawUiText(FitText(line.name, 20.0f, panel.width - 24), panel.x + 12, panel.y + 46, 20.0f, RAYWHITE);
-    float y = panel.y + 84;
+    const Rectangle listArea{panel.x + 8, panel.y + 84, panel.width - 8, panel.height - 256};
+    const float contentHeight = static_cast<float>(line.equipment.size()) * 60.0f;
+    HandleWheelScroll(listArea, contentHeight, ui.equipmentScroll);
+    float y = listArea.y - ui.equipmentScroll;
 
     for (int index = 0; index < static_cast<int>(line.equipment.size()); ++index) {
         Rectangle selectRect{panel.x + 12, y, panel.width - 72, 40};
         Rectangle deleteRect{selectRect.x + selectRect.width + 8, y, 40, 40};
         const std::string label = FitText(line.equipment[index].name, 18.0f, selectRect.width - 20.0f);
+
+        if (deleteRect.y + deleteRect.height < listArea.y || selectRect.y > listArea.y + listArea.height) {
+            y += 60;
+            continue;
+        }
 
         if (GuiButton(selectRect, label.c_str())) {
             ui.selectedEquipment = index;
@@ -435,6 +492,7 @@ void DrawEquipmentPanel(const UiLayout& layout, AppData& data, AppUi& ui, const 
 
         y += 60;
     }
+    DrawScrollHint(listArea, contentHeight, ui.equipmentScroll);
 
     DrawUiText(T("label.add_equipment"), panel.x + 12, panel.y + panel.height - 154, 18.0f, RAYWHITE);
     DrawInputBox(Rectangle{panel.x + 12, panel.y + panel.height - 124, panel.width - 24, 40}, ui.newEquipmentName, FocusField::NewEquipment, ui, T("placeholder.new_equipment"));
@@ -476,8 +534,11 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 
     auto& equipment = data.lines[ui.selectedLine].equipment[ui.selectedEquipment];
     DrawUiText(FitText(equipment.name, 20.0f, panel.width - 24), panel.x + 12, panel.y + 46, 20.0f, RAYWHITE);
-    float y = panel.y + 84;
-    const float visibleBottom = panel.y + panel.height - 176;
+    const Rectangle listArea{panel.x + 8, panel.y + 84, panel.width - 8, panel.height - 198};
+    const float contentHeight = static_cast<float>(equipment.items.size()) * 80.0f;
+    HandleWheelScroll(listArea, contentHeight, ui.itemsScroll);
+    float y = listArea.y - ui.itemsScroll;
+    const float visibleBottom = listArea.y + listArea.height;
 
     for (int index = 0; index < static_cast<int>(equipment.items.size()) && y < visibleBottom; ++index) {
         auto& item = equipment.items[index];
@@ -490,6 +551,11 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
         Rectangle deleteRect{checkRect.x + checkRect.width + 8, y + 7, deleteWidth, 40};
         const std::string title = FitText(item.name, 18.0f, selectRect.width - 20.0f);
         const std::string meta = FitText(T2("meta.every_last", std::to_string(item.periodDays), item.lastCheckedDate), 15.0f, selectRect.width - 10.0f);
+
+        if (deleteRect.y + deleteRect.height < listArea.y || selectRect.y > visibleBottom) {
+            y += 80;
+            continue;
+        }
 
         if (GuiButton(selectRect, title.c_str())) {
             ui.selectedItem = index;
@@ -536,6 +602,7 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 
         y += 80;
     }
+    DrawScrollHint(listArea, contentHeight, ui.itemsScroll);
 
     DrawUiText(T("label.add_item"), panel.x + 12, panel.y + panel.height - 126, 18.0f, RAYWHITE);
     const float itemInputWidth = std::max(180.0f, panel.width - 228.0f);
@@ -589,26 +656,35 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
         SetBanner(ui, data.simulation.enabled ? T("banner.simulation_enabled") : T("banner.simulation_disabled"));
     }
 
-    DrawUiText(T1("label.lines_count", std::to_string(static_cast<int>(data.lines.size()))), panel.x + 16, panel.y + 86, 18.0f, Color{180, 190, 200, 255});
-    DrawUiText(T1("label.equipment_count", std::to_string(equipmentCount)), panel.x + 16, panel.y + 110, 18.0f, Color{180, 190, 200, 255});
-    DrawUiText(T1("label.items_count", std::to_string(itemCount)), panel.x + 16, panel.y + 134, 18.0f, Color{180, 190, 200, 255});
+    DrawInfoCard(Rectangle{panel.x + 16, panel.y + 86, panel.width - 32, 62},
+                 T("label.lines_title"), std::to_string(static_cast<int>(data.lines.size())), Color{71, 153, 255, 255});
+    DrawInfoCard(Rectangle{panel.x + 16, panel.y + 156, panel.width - 32, 62},
+                 T("label.equipment_title"), std::to_string(equipmentCount), Color{114, 197, 149, 255});
+    DrawInfoCard(Rectangle{panel.x + 16, panel.y + 226, panel.width - 32, 62},
+                 T("label.items_title"), std::to_string(itemCount), Color{241, 192, 84, 255});
 
-    const float spinnerWidth = std::max(54.0f, (panel.width - 48.0f) / 3.0f);
-    GuiSpinner(Rectangle{panel.x + 16, panel.y + 168, spinnerWidth, 34}, T("label.year").c_str(), &data.simulation.year, 2020, 2100, true);
-    GuiSpinner(Rectangle{panel.x + 24 + spinnerWidth, panel.y + 168, spinnerWidth, 34}, T("label.month").c_str(), &data.simulation.month, 1, 12, true);
-    GuiSpinner(Rectangle{panel.x + 32 + spinnerWidth * 2.0f, panel.y + 168, spinnerWidth, 34}, T("label.day").c_str(), &data.simulation.day, 1, 31, true);
+    float actionsTop = panel.y + 302;
+    if (data.simulation.enabled) {
+        DrawUiText(T("header.mode.simulation"), panel.x + 16, actionsTop, 18.0f, Color{255, 212, 112, 255});
+        const float spinnerGap = 8.0f;
+        const float spinnerWidth = std::max(56.0f, (panel.width - 32.0f - spinnerGap * 2.0f) / 3.0f);
+        GuiSpinner(Rectangle{panel.x + 16, actionsTop + 24, spinnerWidth, 34}, T("label.year").c_str(), &data.simulation.year, 2020, 2100, true);
+        GuiSpinner(Rectangle{panel.x + 16 + spinnerWidth + spinnerGap, actionsTop + 24, spinnerWidth, 34}, T("label.month").c_str(), &data.simulation.month, 1, 12, true);
+        GuiSpinner(Rectangle{panel.x + 16 + (spinnerWidth + spinnerGap) * 2.0f, actionsTop + 24, spinnerWidth, 34}, T("label.day").c_str(), &data.simulation.day, 1, 31, true);
 
-    if (GuiButton(Rectangle{panel.x + 16, panel.y + 210, panel.width - 32, 34}, T("button.jump_today").c_str())) {
-        ResetSimulationToToday(data);
-        RefreshStatuses(data);
-        SetBanner(ui, T("banner.simulation_today"));
+        if (GuiButton(Rectangle{panel.x + 16, actionsTop + 68, panel.width - 32, 34}, T("button.jump_today").c_str())) {
+            ResetSimulationToToday(data);
+            RefreshStatuses(data);
+            SetBanner(ui, T("banner.simulation_today"));
+        }
+        actionsTop += 110.0f;
     }
 
-    if (GuiButton(Rectangle{panel.x + 16, panel.y + 252, panel.width - 32, 34}, T("button.refresh").c_str())) {
+    if (GuiButton(Rectangle{panel.x + 16, actionsTop, panel.width - 32, 34}, T("button.refresh").c_str())) {
         RefreshStatuses(data);
     }
 
-    if (GuiButton(Rectangle{panel.x + 16, panel.y + 294, panel.width - 32, 34}, T("button.load_sample").c_str())) {
+    if (GuiButton(Rectangle{panel.x + 16, actionsTop + 42, panel.width - 32, 34}, T("button.load_sample").c_str())) {
         if (!data.simulation.enabled) {
             data = BuildSampleData();
             RefreshStatuses(data);
@@ -623,8 +699,9 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
         }
     }
 
-    DrawUiText(T("label.due_today"), panel.x + 16, panel.y + 346, 22.0f, RAYWHITE);
-    float y = panel.y + 378;
+    const float dueTop = actionsTop + 92.0f;
+    DrawUiText(T("label.due_today"), panel.x + 16, dueTop, 22.0f, RAYWHITE);
+    float y = dueTop + 32.0f;
     if (summary.dueToday.empty()) {
         DrawUiText(T("label.nothing_due"), panel.x + 16, y, 18.0f, Color{180, 190, 200, 255});
     } else {

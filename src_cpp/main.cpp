@@ -122,6 +122,34 @@ std::string FitText(const std::string& text, float fontSize, float maxWidth) {
     return "...";
 }
 
+std::vector<std::string> WrapTextLines(const std::string& text, float fontSize, float maxWidth) {
+    std::vector<std::string> lines;
+    std::istringstream stream(text);
+    std::string word;
+    std::string current;
+
+    while (stream >> word) {
+        const std::string candidate = current.empty() ? word : current + " " + word;
+        if (MeasureUiText(candidate, fontSize) <= maxWidth) {
+            current = candidate;
+        } else {
+            if (!current.empty()) {
+                lines.push_back(current);
+            }
+            current = word;
+        }
+    }
+
+    if (!current.empty()) {
+        lines.push_back(current);
+    }
+
+    if (lines.empty()) {
+        lines.push_back(text);
+    }
+    return lines;
+}
+
 std::string ReplaceToken(std::string value, const std::string& token, const std::string& replacement) {
     std::size_t position = value.find(token);
     if (position != std::string::npos) {
@@ -140,6 +168,21 @@ std::string T1(const std::string& key, const std::string& arg0) {
 
 std::string T2(const std::string& key, const std::string& arg0, const std::string& arg1) {
     return ReplaceToken(T1(key, arg0), "{1}", arg1);
+}
+
+std::string T3(const std::string& key, const std::string& arg0, const std::string& arg1, const std::string& arg2) {
+    return ReplaceToken(T2(key, arg0, arg1), "{2}", arg2);
+}
+
+std::string BuildAlertHeadline(const MaintenanceAlert& alert) {
+    return T3("summary.headline", alert.lineName, alert.equipmentName, alert.slotName);
+}
+
+std::string BuildAlertTail(const MaintenanceAlert& alert, bool overdue) {
+    if (overdue) {
+        return T1("summary.overdue_days", std::to_string(alert.daysLate));
+    }
+    return T("summary.due_now");
 }
 
 std::string Utf8FromCodepoint(int codepoint) {
@@ -385,6 +428,41 @@ void DrawInfoCard(Rectangle bounds, const std::string& title, const std::string&
     DrawRectangleRounded(Rectangle{bounds.x, bounds.y, 5, bounds.height}, 0.3f, 4, accent);
     DrawUiText(title, bounds.x + 14, bounds.y + 10, 15.0f, Color{160, 170, 180, 255});
     DrawUiText(value, bounds.x + 14, bounds.y + 34, 22.0f, RAYWHITE);
+}
+
+float DrawAlertSection(Rectangle bounds, const std::string& title, const std::vector<MaintenanceAlert>& alerts, bool overdue, const std::string& emptyText, Color accent) {
+    DrawUiText(title, bounds.x, bounds.y, 22.0f, RAYWHITE);
+    float y = bounds.y + 34.0f;
+
+    if (alerts.empty()) {
+        DrawUiText(emptyText, bounds.x, y, 17.0f, Color{180, 190, 200, 255});
+        return y + 28.0f;
+    }
+
+    for (const auto& alert : alerts) {
+        const std::string headline = BuildAlertHeadline(alert);
+        const std::vector<std::string> headlineLines = WrapTextLines(headline, 15.0f, bounds.width);
+        const std::string tail = BuildAlertTail(alert, overdue);
+        const float entryHeight = 16.0f + static_cast<float>(headlineLines.size()) * 18.0f + 18.0f;
+
+        if (y + entryHeight > bounds.y + bounds.height) {
+            break;
+        }
+
+        DrawRectangleRounded(Rectangle{bounds.x, y, bounds.width, entryHeight}, 0.16f, 8, Color{24, 34, 46, 255});
+        DrawRectangleRoundedLines(Rectangle{bounds.x, y, bounds.width, entryHeight}, 0.16f, 8, 1.0f, Color{60, 78, 102, 255});
+        DrawRectangleRounded(Rectangle{bounds.x, y, 5, entryHeight}, 0.3f, 4, accent);
+
+        float textY = y + 10.0f;
+        for (const auto& line : headlineLines) {
+            DrawUiText(line, bounds.x + 12, textY, 15.0f, RAYWHITE);
+            textY += 18.0f;
+        }
+        DrawUiText(tail, bounds.x + 12, textY + 2.0f, 14.0f, overdue ? Color{255, 130, 120, 255} : Color{252, 210, 110, 255});
+        y += entryHeight + 10.0f;
+    }
+
+    return y;
 }
 
 void DrawHeader(const AppData& data, AppUi& ui) {
@@ -762,30 +840,14 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
         }
     }
 
-    const float dueTop = actionsTop + 92.0f;
-    DrawUiText(T("label.due_today"), panel.x + 16, dueTop, 22.0f, RAYWHITE);
-    float y = dueTop + 32.0f;
-    if (summary.dueToday.empty()) {
-        DrawUiText(T("label.nothing_due"), panel.x + 16, y, 18.0f, Color{180, 190, 200, 255});
-    } else {
-        for (const auto& label : summary.dueToday) {
-            if (y > panel.y + panel.height - 170) break;
-            DrawUiText(FitText(label, 16.0f, panel.width - 32), panel.x + 16, y, 16.0f, Color{252, 210, 110, 255});
-            y += 22;
-        }
-    }
+    const float alertsTop = actionsTop + 92.0f;
+    const float alertsHeight = panel.y + panel.height - alertsTop - 16.0f;
+    const float dueHeight = std::max(96.0f, alertsHeight * 0.32f);
+    const Rectangle dueArea{panel.x + 16, alertsTop, panel.width - 32, dueHeight};
+    DrawAlertSection(dueArea, T("label.due_today"), summary.dueToday, false, T("label.nothing_due"), Color{241, 192, 84, 255});
 
-    DrawUiText(T("label.overdue"), panel.x + 16, panel.y + panel.height - 150, 22.0f, RAYWHITE);
-    y = panel.y + panel.height - 116;
-    if (summary.overdue.empty()) {
-        DrawUiText(T("label.nothing_overdue"), panel.x + 16, y, 18.0f, Color{180, 190, 200, 255});
-    } else {
-        for (const auto& label : summary.overdue) {
-            if (y > panel.y + panel.height - 20) break;
-            DrawUiText(FitText(label, 16.0f, panel.width - 32), panel.x + 16, y, 16.0f, Color{255, 130, 120, 255});
-            y += 22;
-        }
-    }
+    const Rectangle overdueArea{panel.x + 16, alertsTop + dueHeight + 12.0f, panel.width - 32, alertsHeight - dueHeight - 12.0f};
+    DrawAlertSection(overdueArea, T("label.overdue"), summary.overdue, true, T("label.nothing_overdue"), Color{239, 115, 115, 255});
 }
 
 }  // namespace

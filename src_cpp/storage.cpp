@@ -161,22 +161,32 @@ DueSummary BuildDueSummary(const AppData& data) {
                     continue;
                 }
 
-                std::ostringstream label;
-                label << line.name << " / " << equipment.name << " / " << item.name;
-
                 if (daysSince > item.periodDays) {
-                    label << " (overdue by " << (daysSince - item.periodDays) << " days)";
-                    summary.overdue.push_back(label.str());
+                    summary.overdue.push_back(MaintenanceAlert{
+                        line.name,
+                        equipment.name,
+                        item.name,
+                        daysSince - item.periodDays
+                    });
                 } else if (daysSince == item.periodDays) {
-                    label << " (due today)";
-                    summary.dueToday.push_back(label.str());
+                    summary.dueToday.push_back(MaintenanceAlert{
+                        line.name,
+                        equipment.name,
+                        item.name,
+                        0
+                    });
                 }
             }
         }
     }
 
-    std::sort(summary.dueToday.begin(), summary.dueToday.end());
-    std::sort(summary.overdue.begin(), summary.overdue.end());
+    const auto sorter = [](const MaintenanceAlert& left, const MaintenanceAlert& right) {
+        if (left.lineName != right.lineName) return left.lineName < right.lineName;
+        if (left.equipmentName != right.equipmentName) return left.equipmentName < right.equipmentName;
+        return left.slotName < right.slotName;
+    };
+    std::sort(summary.dueToday.begin(), summary.dueToday.end(), sorter);
+    std::sort(summary.overdue.begin(), summary.overdue.end(), sorter);
     return summary;
 }
 

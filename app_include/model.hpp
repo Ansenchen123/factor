@@ -29,6 +29,13 @@ struct SimulationState {
     int day = 1;
 };
 
+struct MaintenanceAlert {
+    std::string lineName;
+    std::string equipmentName;
+    std::string slotName;
+    int daysLate = 0;
+};
+
 struct AppData {
     std::vector<ProductionLine> lines;
     std::string currentDate;
@@ -36,8 +43,8 @@ struct AppData {
 };
 
 struct DueSummary {
-    std::vector<std::string> dueToday;
-    std::vector<std::string> overdue;
+    std::vector<MaintenanceAlert> dueToday;
+    std::vector<MaintenanceAlert> overdue;
 };
 
 }  // namespace factor

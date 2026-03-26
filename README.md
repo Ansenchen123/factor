@@ -82,7 +82,7 @@ cmake --build build
 build/factor_manager.exe
 ```
 
-The app reads and writes data from `data/database.json`.
+The app reads and writes all maintenance records from `data/maintenance/database.json`.
 
 ## What Makes This Resume-Worthy
 

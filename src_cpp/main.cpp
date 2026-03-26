@@ -142,6 +142,56 @@ std::string T2(const std::string& key, const std::string& arg0, const std::strin
     return ReplaceToken(T1(key, arg0), "{1}", arg1);
 }
 
+std::string Utf8FromCodepoint(int codepoint) {
+    std::string output;
+    if (codepoint <= 0x7F) {
+        output.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7FF) {
+        output.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+        output.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0x10FFFF) {
+        output.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+        output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    }
+    return output;
+}
+
+void EraseLastUtf8Codepoint(std::string& value) {
+    if (value.empty()) {
+        return;
+    }
+
+    std::size_t index = value.size() - 1;
+    while (index > 0 && (static_cast<unsigned char>(value[index]) & 0xC0) == 0x80) {
+        --index;
+    }
+    value.erase(index);
+}
+
+std::filesystem::path ResolveDataFile(const std::filesystem::path& root) {
+    const std::filesystem::path preferred = root / "data" / "maintenance" / "database.json";
+    const std::filesystem::path legacy = root / "data" / "database.json";
+
+    if (std::filesystem::exists(preferred)) {
+        return preferred;
+    }
+
+    if (std::filesystem::exists(legacy)) {
+        std::filesystem::create_directories(preferred.parent_path());
+        std::error_code error;
+        std::filesystem::copy_file(legacy, preferred, std::filesystem::copy_options::overwrite_existing, error);
+        return preferred;
+    }
+
+    return preferred;
+}
+
 UiLayout BuildLayout() {
     const float margin = 20.0f;
     const float gap = 20.0f;
@@ -166,6 +216,9 @@ UiLayout BuildLayout() {
 std::filesystem::path ResolveProjectRoot(char* argv0) {
     std::filesystem::path current = std::filesystem::absolute(argv0).parent_path();
     for (int depth = 0; depth < 4; ++depth) {
+        if (std::filesystem::exists(current / "data" / "maintenance" / "database.json")) {
+            return current;
+        }
         if (std::filesystem::exists(current / "data" / "database.json")) {
             return current;
         }
@@ -252,14 +305,15 @@ void DrawScrollHint(Rectangle bounds, float contentHeight, float scrollOffset) {
 void HandleTextInput(std::string& value, std::size_t maxLength) {
     int key = GetCharPressed();
     while (key > 0) {
-        if (key >= 32 && key <= 126 && value.size() < maxLength) {
-            value.push_back(static_cast<char>(key));
+        const std::string utf8 = Utf8FromCodepoint(key);
+        if (key >= 32 && !utf8.empty() && value.size() + utf8.size() <= maxLength * 4) {
+            value += utf8;
         }
         key = GetCharPressed();
     }
 
     if (IsKeyPressed(KEY_BACKSPACE) && !value.empty()) {
-        value.pop_back();
+        EraseLastUtf8Codepoint(value);
     }
 }
 
@@ -734,7 +788,7 @@ int main(int argc, char** argv) {
 
     (void)argc;
     const std::filesystem::path root = ResolveProjectRoot((argv != nullptr && argv[0] != nullptr) ? argv[0] : const_cast<char*>("."));
-    const std::filesystem::path dataFile = root / "data" / "database.json";
+    const std::filesystem::path dataFile = ResolveDataFile(root);
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(kWindowWidth, kWindowHeight, "Factor Manager");

@@ -52,7 +52,8 @@ struct AppUi {
     float linesScroll = 0.0f;
     float equipmentScroll = 0.0f;
     float itemsScroll = 0.0f;
-    float dashboardAlertsScroll = 0.0f;
+    float dueAlertsScroll = 0.0f;
+    float overdueAlertsScroll = 0.0f;
     FocusField focusedField = FocusField::None;
     std::string newLineName;
     std::string renameLineName;
@@ -71,6 +72,7 @@ struct UiLayout {
     Rectangle equipment;
     Rectangle items;
     Rectangle dashboard;
+    Rectangle alerts;
 };
 
 void LoadUiFont(const std::filesystem::path& root) {
@@ -281,6 +283,8 @@ UiLayout BuildLayout() {
     const float bottom = ScalePx(18.0f);
     const float totalWidth = static_cast<float>(GetScreenWidth()) - (margin * 2.0f) - (gap * 3.0f);
     const float panelHeight = static_cast<float>(GetScreenHeight()) - top - bottom;
+    const float bottomBandHeight = std::clamp(panelHeight * 0.25f, ScalePx(200.0f), ScalePx(280.0f));
+    const float topPanelHeight = panelHeight - bottomBandHeight - gap;
 
     const float linesWidth = std::clamp(totalWidth * 0.18f, ScalePx(240.0f), ScalePx(320.0f));
     const float equipmentWidth = std::clamp(totalWidth * 0.23f, ScalePx(280.0f), ScalePx(380.0f));
@@ -290,8 +294,9 @@ UiLayout BuildLayout() {
     UiLayout layout{};
     layout.lines = Rectangle{margin, top, linesWidth, panelHeight};
     layout.equipment = Rectangle{layout.lines.x + layout.lines.width + gap, top, equipmentWidth, panelHeight};
-    layout.items = Rectangle{layout.equipment.x + layout.equipment.width + gap, top, itemsWidth, panelHeight};
-    layout.dashboard = Rectangle{layout.items.x + layout.items.width + gap, top, dashboardWidth, panelHeight};
+    layout.items = Rectangle{layout.equipment.x + layout.equipment.width + gap, top, itemsWidth, topPanelHeight};
+    layout.dashboard = Rectangle{layout.items.x + layout.items.width + gap, top, dashboardWidth, topPanelHeight};
+    layout.alerts = Rectangle{layout.items.x, top + topPanelHeight + gap, itemsWidth + gap + dashboardWidth, bottomBandHeight};
     return layout;
 }
 
@@ -518,22 +523,36 @@ float EstimateAlertSectionHeight(const std::vector<MaintenanceAlert>& alerts, fl
     return height;
 }
 
-void DrawAlertsFeed(Rectangle bounds, const DueSummary& summary, AppUi& ui) {
-    const float totalContentHeight =
-        EstimateAlertSectionHeight(summary.dueToday, bounds.width) +
-        EstimateAlertSectionHeight(summary.overdue, bounds.width) +
-        ScalePx(14.0f);
-
-    HandleWheelScroll(bounds, totalContentHeight, ui.dashboardAlertsScroll);
+void DrawSingleAlertFeed(Rectangle bounds,
+                         const std::string& title,
+                         const std::vector<MaintenanceAlert>& alerts,
+                         bool overdue,
+                         const std::string& emptyText,
+                         Color accent,
+                         float& scrollOffset) {
+    const float totalContentHeight = EstimateAlertSectionHeight(alerts, bounds.width);
+    HandleWheelScroll(bounds, totalContentHeight, scrollOffset);
 
     BeginScissorMode(static_cast<int>(bounds.x), static_cast<int>(bounds.y), static_cast<int>(bounds.width), static_cast<int>(bounds.height));
-    float y = bounds.y - ui.dashboardAlertsScroll;
-    y = DrawAlertSection(Rectangle{bounds.x, y, bounds.width, totalContentHeight}, T("label.due_today"), summary.dueToday, false, T("label.nothing_due"), Color{241, 192, 84, 255});
-    y += ScalePx(14.0f);
-    DrawAlertSection(Rectangle{bounds.x, y, bounds.width, totalContentHeight}, T("label.overdue"), summary.overdue, true, T("label.nothing_overdue"), Color{239, 115, 115, 255});
+    DrawAlertSection(Rectangle{bounds.x, bounds.y - scrollOffset, bounds.width, totalContentHeight}, title, alerts, overdue, emptyText, accent);
     EndScissorMode();
 
-    DrawScrollHint(bounds, totalContentHeight, ui.dashboardAlertsScroll);
+    DrawScrollHint(bounds, totalContentHeight, scrollOffset);
+}
+
+void DrawAlertsPanel(const UiLayout& layout, const AppData& data, AppUi& ui) {
+    const DueSummary summary = BuildDueSummary(data);
+    const std::string panelTitle = T("label.due_today") + " / " + T("label.overdue");
+    const Rectangle panel = Panel(layout.alerts.x, layout.alerts.y, layout.alerts.width, layout.alerts.height, panelTitle.c_str());
+    const float innerGap = ScalePx(16.0f);
+    const float sectionTop = panel.y + ScalePx(58.0f);
+    const float sectionHeight = panel.height - ScalePx(74.0f);
+    const float sectionWidth = (panel.width - innerGap * 3.0f) / 2.0f;
+    const Rectangle dueBounds{panel.x + innerGap, sectionTop, sectionWidth, sectionHeight};
+    const Rectangle overdueBounds{dueBounds.x + sectionWidth + innerGap, sectionTop, sectionWidth, sectionHeight};
+
+    DrawSingleAlertFeed(dueBounds, T("label.due_today"), summary.dueToday, false, T("label.nothing_due"), Color{241, 192, 84, 255}, ui.dueAlertsScroll);
+    DrawSingleAlertFeed(overdueBounds, T("label.overdue"), summary.overdue, true, T("label.nothing_overdue"), Color{239, 115, 115, 255}, ui.overdueAlertsScroll);
 }
 
 void DrawHeader(const AppData& data, AppUi& ui) {
@@ -853,7 +872,6 @@ void DrawItemsPanel(const UiLayout& layout, AppData& data, AppUi& ui, const std:
 void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::filesystem::path& dataFile) {
     const std::string panelTitle = T("panel.dashboard");
     const Rectangle panel = Panel(layout.dashboard.x, layout.dashboard.y, layout.dashboard.width, layout.dashboard.height, panelTitle.c_str());
-    const DueSummary summary = BuildDueSummary(data);
     int equipmentCount = 0;
     int itemCount = 0;
     for (const auto& line : data.lines) {
@@ -917,14 +935,6 @@ void DrawDashboard(const UiLayout& layout, AppData& data, AppUi& ui, const std::
         }
     }
 
-    const float alertsTop = actionsTop + ScalePx(96.0f);
-    const Rectangle alertsArea{
-        panel.x + ScalePx(16.0f),
-        alertsTop,
-        panel.width - ScalePx(32.0f),
-        panel.y + panel.height - alertsTop - ScalePx(16.0f)
-    };
-    DrawAlertsFeed(alertsArea, summary, ui);
 }
 
 }  // namespace
@@ -978,6 +988,7 @@ int main(int argc, char** argv) {
         DrawEquipmentPanel(layout, data, ui, dataFile);
         DrawItemsPanel(layout, data, ui, dataFile);
         DrawDashboard(layout, data, ui, dataFile);
+        DrawAlertsPanel(layout, data, ui);
 
         EndDrawing();
     }

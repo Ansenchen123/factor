@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -17,6 +19,10 @@
 namespace factor {
 
 namespace {
+
+extern "C" __declspec(dllimport) int __stdcall MessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, unsigned int uType);
+constexpr unsigned int kMessageBoxOk = 0x00000000U;
+constexpr unsigned int kMessageBoxIconError = 0x00000010U;
 
 constexpr int kWindowWidth = 1440;
 constexpr int kWindowHeight = 900;
@@ -355,6 +361,76 @@ std::filesystem::path ResolveProjectRoot(char* argv0) {
         current = current.parent_path();
     }
     return std::filesystem::current_path();
+}
+
+std::filesystem::path ResolveExecutableDirectory(char* argv0) {
+    try {
+        if (argv0 != nullptr) {
+            return std::filesystem::absolute(argv0).parent_path();
+        }
+    } catch (...) {
+    }
+    return std::filesystem::current_path();
+}
+
+std::string CurrentTimestamp() {
+    std::time_t now = std::time(nullptr);
+    std::tm local = *std::localtime(&now);
+    char buffer[20]{};
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d",
+                  local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                  local.tm_hour, local.tm_min, local.tm_sec);
+    return buffer;
+}
+
+void AppendStartupLog(const std::filesystem::path& executableDir, const std::string& message) {
+    try {
+        std::ofstream output(executableDir / "factor_startup.log", std::ios::app);
+        if (!output) {
+            return;
+        }
+        output << "[" << CurrentTimestamp() << "] " << message << "\n";
+    } catch (...) {
+    }
+}
+
+void ShowFatalStartupError(const std::filesystem::path& executableDir, const std::string& message) {
+    const std::string logPath = (executableDir / "factor_startup.log").string();
+    const std::string body =
+        "Factor Manager could not start.\n\n" +
+        message +
+        "\n\nSee log:\n" + logPath +
+        "\n\nCommon causes:\n"
+        "- running the EXE directly inside the zip\n"
+        "- missing files next to the EXE\n"
+        "- antivirus blocking the app or bundled DLLs\n"
+        "- unsupported graphics/OpenGL environment";
+    MessageBoxA(nullptr, body.c_str(), "Factor Manager Startup Error", kMessageBoxOk | kMessageBoxIconError);
+}
+
+void ValidateReleaseFiles(const std::filesystem::path& root) {
+    const std::vector<std::filesystem::path> required = {
+        root / "data" / "font.otf",
+        root / "data" / "font_bold.otf",
+        root / "data" / "locales" / "zh-TW.json",
+        root / "data" / "locales" / "en-US.json"
+    };
+
+    std::vector<std::string> missing;
+    for (const auto& path : required) {
+        if (!std::filesystem::exists(path)) {
+            missing.push_back(path.string());
+        }
+    }
+
+    if (!missing.empty()) {
+        std::ostringstream stream;
+        stream << "Missing release files:";
+        for (const auto& path : missing) {
+            stream << "\n- " << path;
+        }
+        throw std::runtime_error(stream.str());
+    }
 }
 
 void SetBanner(AppUi& ui, const std::string& message) {
@@ -1062,55 +1138,87 @@ int main(int argc, char** argv) {
     using namespace factor;
 
     (void)argc;
-    const std::filesystem::path root = ResolveProjectRoot((argv != nullptr && argv[0] != nullptr) ? argv[0] : const_cast<char*>("."));
-    const std::filesystem::path dataFile = ResolveDataFile(root);
+    const auto argvPath = (argv != nullptr && argv[0] != nullptr) ? argv[0] : const_cast<char*>(".");
+    const std::filesystem::path executableDir = ResolveExecutableDirectory(argvPath);
+    AppendStartupLog(executableDir, "Launch requested.");
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(kWindowWidth, kWindowHeight, "Factor Manager");
-    SetWindowMinSize(kWindowMinWidth, kWindowMinHeight);
-    SetTargetFPS(60);
-    LoadUiFont(root);
-    UpdateUiScale();
-    g_localizer.LoadFromDirectory(root / "data" / "locales");
-    if (!g_localizer.SetActiveCode("zh-TW")) {
-        g_localizer.SetActiveCode("en-US");
-    }
+    try {
+        const std::filesystem::path root = ResolveProjectRoot(argvPath);
+        const std::filesystem::path dataFile = ResolveDataFile(root);
+        AppendStartupLog(executableDir, "Resolved root: " + root.string());
+        AppendStartupLog(executableDir, "Using data file: " + dataFile.string());
 
-    AppData data = LoadAppData(dataFile);
-    RefreshStatuses(data);
+        ValidateReleaseFiles(root);
 
-    AppUi ui;
-    if (!data.lines.empty()) {
-        ui.selectedLine = 0;
-        if (!data.lines[0].equipment.empty()) {
-            ui.selectedEquipment = 0;
-            if (!data.lines[0].equipment[0].items.empty()) {
-                ui.selectedItem = 0;
+        SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+        InitWindow(kWindowWidth, kWindowHeight, "Factor Manager");
+        if (!IsWindowReady()) {
+            throw std::runtime_error("InitWindow failed. The graphics environment may not support this build.");
+        }
+
+        SetWindowMinSize(kWindowMinWidth, kWindowMinHeight);
+        SetTargetFPS(60);
+        LoadUiFont(root);
+        UpdateUiScale();
+        g_localizer.LoadFromDirectory(root / "data" / "locales");
+        if (!g_localizer.SetActiveCode("zh-TW")) {
+            g_localizer.SetActiveCode("en-US");
+        }
+
+        AppData data = LoadAppData(dataFile);
+        RefreshStatuses(data);
+
+        AppUi ui;
+        if (!data.lines.empty()) {
+            ui.selectedLine = 0;
+            if (!data.lines[0].equipment.empty()) {
+                ui.selectedEquipment = 0;
+                if (!data.lines[0].equipment[0].items.empty()) {
+                    ui.selectedItem = 0;
+                }
             }
         }
+        SyncRenameBuffers(data, ui);
+
+        while (!WindowShouldClose()) {
+            UpdateUiScale();
+            RefreshStatuses(data);
+            ClampSelections(data, ui);
+            const UiLayout layout = BuildLayout(data.simulation.enabled && ui.hideDashboardInSimulation);
+
+            BeginDrawing();
+            ClearBackground(Color{15, 20, 29, 255});
+
+            DrawHeader(data, ui);
+            DrawLinesPanel(layout, data, ui, dataFile);
+            DrawEquipmentPanel(layout, data, ui, dataFile);
+            DrawItemsPanel(layout, data, ui, dataFile);
+            DrawDashboard(layout, data, ui, dataFile);
+            DrawAlertsPanel(layout, data, ui);
+
+            EndDrawing();
+        }
+
+        UnloadUiFont();
+        CloseWindow();
+        AppendStartupLog(executableDir, "Application closed normally.");
+        return 0;
+    } catch (const std::exception& error) {
+        AppendStartupLog(executableDir, std::string("Startup failure: ") + error.what());
+        if (IsWindowReady()) {
+            UnloadUiFont();
+            CloseWindow();
+        }
+        ShowFatalStartupError(executableDir, error.what());
+        return 1;
+    } catch (...) {
+        const std::string message = "Unknown startup failure.";
+        AppendStartupLog(executableDir, message);
+        if (IsWindowReady()) {
+            UnloadUiFont();
+            CloseWindow();
+        }
+        ShowFatalStartupError(executableDir, message);
+        return 1;
     }
-    SyncRenameBuffers(data, ui);
-
-    while (!WindowShouldClose()) {
-        UpdateUiScale();
-        RefreshStatuses(data);
-        ClampSelections(data, ui);
-        const UiLayout layout = BuildLayout(data.simulation.enabled && ui.hideDashboardInSimulation);
-
-        BeginDrawing();
-        ClearBackground(Color{15, 20, 29, 255});
-
-        DrawHeader(data, ui);
-        DrawLinesPanel(layout, data, ui, dataFile);
-        DrawEquipmentPanel(layout, data, ui, dataFile);
-        DrawItemsPanel(layout, data, ui, dataFile);
-        DrawDashboard(layout, data, ui, dataFile);
-        DrawAlertsPanel(layout, data, ui);
-
-        EndDrawing();
-    }
-
-    UnloadUiFont();
-    CloseWindow();
-    return 0;
 }

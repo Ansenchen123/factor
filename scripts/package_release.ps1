@@ -84,6 +84,7 @@ $launcherNote = @"
 Factor Manager Release Package
 
 Run:
+  1. Extract the zip to a normal folder first
   factor_manager.exe
 
 Bundled runtime files:
@@ -94,6 +95,7 @@ Bundled runtime files:
   data/
 
 This package is self-contained. Keep all files in the same folder structure.
+If the app does not open, check factor_startup.log next to the EXE.
 "@
 Set-Content -Path (Join-Path $packageRoot 'RUN.txt') -Value $launcherNote -Encoding UTF8
 

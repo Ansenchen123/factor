@@ -41,9 +41,27 @@ target_link_libraries(factor_manager PRIVATE
 
 if (WIN32)
     target_compile_definitions(factor_manager PRIVATE PLATFORM_DESKTOP)
+    get_filename_component(CXX_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(FACTOR_RUNTIME_DLLS
+        raylib.dll
+        libstdc++-6.dll
+        libgcc_s_seh-1.dll
+        libwinpthread-1.dll
+    )
+
     add_custom_command(TARGET factor_manager POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/raylib.dll
             $<TARGET_FILE_DIR:factor_manager>/raylib.dll
     )
+
+    foreach(runtime_dll IN LISTS FACTOR_RUNTIME_DLLS)
+        if (EXISTS "${CXX_COMPILER_DIR}/${runtime_dll}" AND NOT "${runtime_dll}" STREQUAL "raylib.dll")
+            add_custom_command(TARGET factor_manager POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CXX_COMPILER_DIR}/${runtime_dll}"
+                    "$<TARGET_FILE_DIR:factor_manager>/${runtime_dll}"
+            )
+        endif()
+    endforeach()
 endif()

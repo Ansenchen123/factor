@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -21,8 +22,12 @@ namespace factor {
 namespace {
 
 extern "C" __declspec(dllimport) int __stdcall MessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, unsigned int uType);
+extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameW(void* hModule, wchar_t* lpFilename, unsigned long nSize);
+extern "C" __declspec(dllimport) int __stdcall SetCurrentDirectoryW(const wchar_t* lpPathName);
+extern "C" __declspec(dllimport) unsigned long __stdcall GetFileAttributesW(const wchar_t* lpFileName);
 constexpr unsigned int kMessageBoxOk = 0x00000000U;
 constexpr unsigned int kMessageBoxIconError = 0x00000010U;
+constexpr unsigned long kInvalidFileAttributes = 0xFFFFFFFFUL;
 
 constexpr int kWindowWidth = 1440;
 constexpr int kWindowHeight = 900;
@@ -83,6 +88,26 @@ struct UiLayout {
     Rectangle alerts;
 };
 
+std::vector<unsigned char> ReadBinaryFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return {};
+    }
+
+    input.seekg(0, std::ios::end);
+    const std::streamsize size = input.tellg();
+    if (size <= 0) {
+        return {};
+    }
+
+    input.seekg(0, std::ios::beg);
+    std::vector<unsigned char> buffer(static_cast<std::size_t>(size));
+    if (!input.read(reinterpret_cast<char*>(buffer.data()), size)) {
+        return {};
+    }
+    return buffer;
+}
+
 void LoadUiFont(const std::filesystem::path& root) {
     const auto regularPath = root / "data" / "font.otf";
     const auto boldPath = root / "data" / "font_bold.otf";
@@ -95,8 +120,14 @@ void LoadUiFont(const std::filesystem::path& root) {
         for (int code = 0xFF00; code <= 0xFFEF; ++code) codepoints.push_back(code);
         for (int code = 0x4E00; code <= 0x9FFF; ++code) codepoints.push_back(code);
 
-        g_uiFontRegular = LoadFontEx(regularPath.string().c_str(), kFontAtlasSize, codepoints.data(), static_cast<int>(codepoints.size()));
-        g_uiFontStrong = LoadFontEx(boldPath.string().c_str(), kFontAtlasSize, codepoints.data(), static_cast<int>(codepoints.size()));
+        const auto regularBytes = ReadBinaryFile(regularPath);
+        const auto boldBytes = ReadBinaryFile(boldPath);
+        if (!regularBytes.empty() && !boldBytes.empty()) {
+            g_uiFontRegular = LoadFontFromMemory(".otf", regularBytes.data(), static_cast<int>(regularBytes.size()),
+                                                 kFontAtlasSize, codepoints.data(), static_cast<int>(codepoints.size()));
+            g_uiFontStrong = LoadFontFromMemory(".otf", boldBytes.data(), static_cast<int>(boldBytes.size()),
+                                                kFontAtlasSize, codepoints.data(), static_cast<int>(codepoints.size()));
+        }
         if (g_uiFontRegular.texture.id != 0 && g_uiFontStrong.texture.id != 0) {
             SetTextureFilter(g_uiFontRegular.texture, TEXTURE_FILTER_POINT);
             SetTextureFilter(g_uiFontStrong.texture, TEXTURE_FILTER_POINT);
@@ -343,16 +374,20 @@ UiLayout BuildLayout(bool hideDashboard) {
     return layout;
 }
 
-std::filesystem::path ResolveProjectRoot(char* argv0) {
-    std::filesystem::path current = std::filesystem::absolute(argv0).parent_path();
+bool PathExistsWide(const std::filesystem::path& path) {
+    return GetFileAttributesW(path.c_str()) != kInvalidFileAttributes;
+}
+
+std::filesystem::path ResolveProjectRoot(const std::filesystem::path& executableDir) {
+    std::filesystem::path current = executableDir;
     for (int depth = 0; depth < 4; ++depth) {
-        if (std::filesystem::exists(current / "data" / "maintenance" / "database.json")) {
+        if (PathExistsWide(current / "data" / "maintenance" / "database.json")) {
             return current;
         }
-        if (std::filesystem::exists(current / "data" / "database.json")) {
+        if (PathExistsWide(current / "data" / "database.json")) {
             return current;
         }
-        if (std::filesystem::exists(current / "CMakeLists.txt")) {
+        if (PathExistsWide(current / "CMakeLists.txt")) {
             return current;
         }
         if (!current.has_parent_path()) {
@@ -365,8 +400,17 @@ std::filesystem::path ResolveProjectRoot(char* argv0) {
 
 std::filesystem::path ResolveExecutableDirectory(char* argv0) {
     try {
-        if (argv0 != nullptr) {
-            return std::filesystem::absolute(argv0).parent_path();
+        std::vector<wchar_t> buffer(1024, L'\0');
+        const unsigned long length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<unsigned long>(buffer.size()));
+        if (length > 0 && length < buffer.size()) {
+            return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path();
+        }
+    } catch (...) {
+    }
+
+    try {
+        if (argv0 != nullptr && argv0[0] != '\0') {
+            return std::filesystem::absolute(std::filesystem::u8path(argv0)).parent_path();
         }
     } catch (...) {
     }
@@ -1143,12 +1187,17 @@ int main(int argc, char** argv) {
     AppendStartupLog(executableDir, "Launch requested.");
 
     try {
-        const std::filesystem::path root = ResolveProjectRoot(argvPath);
-        const std::filesystem::path dataFile = ResolveDataFile(root);
-        AppendStartupLog(executableDir, "Resolved root: " + root.string());
-        AppendStartupLog(executableDir, "Using data file: " + dataFile.string());
+        const std::filesystem::path root = ResolveProjectRoot(executableDir);
+        if (!SetCurrentDirectoryW(root.c_str())) {
+            throw std::runtime_error("Failed to switch working directory to the application root.");
+        }
 
-        ValidateReleaseFiles(root);
+        const std::filesystem::path relativeRoot = ".";
+        const std::filesystem::path dataFile = ResolveDataFile(relativeRoot);
+        AppendStartupLog(executableDir, "Resolved application root and switched working directory.");
+        AppendStartupLog(executableDir, "Using relative data path: data/maintenance/database.json");
+
+        ValidateReleaseFiles(relativeRoot);
 
         SetConfigFlags(FLAG_WINDOW_RESIZABLE);
         InitWindow(kWindowWidth, kWindowHeight, "Factor Manager");
@@ -1158,9 +1207,9 @@ int main(int argc, char** argv) {
 
         SetWindowMinSize(kWindowMinWidth, kWindowMinHeight);
         SetTargetFPS(60);
-        LoadUiFont(root);
+        LoadUiFont(relativeRoot);
         UpdateUiScale();
-        g_localizer.LoadFromDirectory(root / "data" / "locales");
+        g_localizer.LoadFromDirectory(relativeRoot / "data" / "locales");
         if (!g_localizer.SetActiveCode("zh-TW")) {
             g_localizer.SetActiveCode("en-US");
         }
